@@ -1,0 +1,124 @@
+{"sessionId":"c15644","hypothesisId":"H1","location":"dashboard.js","message":"INIT: chartTooltip element","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691085322}
+{"sessionId":"c15644","hypothesisId":"H3","location":"dashboard.js","message":"bindExternalTooltip called","data":{"chartId":"cMovies","pluginsType":"object"},"timestamp":1780691085502}
+{"sessionId":"c15644","hypothesisId":"H1","location":"dashboard.js","message":"INIT: chartTooltip element","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691088181}
+{"sessionId":"c15644","hypothesisId":"H3","location":"dashboard.js","message":"bindExternalTooltip called","data":{"chartId":"cMovies","pluginsType":"object"},"timestamp":1780691088262}
+{"sessionId":"c15644","hypothesisId":"H1","location":"dashboard.js","message":"INIT: chartTooltip element","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691113147}
+{"sessionId":"c15644","hypothesisId":"H3","location":"dashboard.js","message":"bindExternalTooltip called","data":{"chartId":"cMovies","pluginsType":"object"},"timestamp":1780691113202}
+{"sessionId":"c15644","hypothesisId":"H1","location":"dashboard.js","message":"INIT: chartTooltip element","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691297828}
+{"sessionId":"c15644","hypothesisId":"H3","location":"dashboard.js","message":"bindExternalTooltip called","data":{"chartId":"cMovies","pluginsType":"object"},"timestamp":1780691298011}
+{"sessionId":"c15644","hypothesisId":"H1","message":"chartTooltip el","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691346623}
+{"sessionId":"c15644","hypothesisId":"H2","message":"initOverview start","data":{},"timestamp":1780691346645}
+{"sessionId":"c15644","hypothesisId":"H2","message":"C.movies created","data":{"ok":true},"timestamp":1780691346785}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cMovies"},"timestamp":1780691346787}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cMovies","err":"Maximum call stack size exceeded"},"timestamp":1780691346794}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScores"},"timestamp":1780691346840}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cScores","err":"Maximum call stack size exceeded"},"timestamp":1780691346850}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGross"},"timestamp":1780691346889}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGross","err":"Maximum call stack size exceeded"},"timestamp":1780691346894}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352264}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352274}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352280}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352720}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352738}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352756}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352773}
+{"sessionId":"c15644","hypothesisId":"UNCAUGHT","message":"Script error.","data":{"src":"","line":0,"col":0},"timestamp":1780691352789}
+{"sessionId":"c15644","hypothesisId":"H1","message":"chartTooltip el","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691355014}
+{"sessionId":"c15644","hypothesisId":"H2","message":"initOverview start","data":{},"timestamp":1780691355023}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cMovies"},"timestamp":1780691355111}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cMovies","err":"Maximum call stack size exceeded"},"timestamp":1780691355114}
+{"sessionId":"c15644","hypothesisId":"H2","message":"C.movies created","data":{"ok":true},"timestamp":1780691355109}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScores"},"timestamp":1780691355153}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cScores","err":"Maximum call stack size exceeded"},"timestamp":1780691355155}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGross"},"timestamp":1780691355186}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGross","err":"Maximum call stack size exceeded"},"timestamp":1780691355189}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScatter"},"timestamp":1780691358234}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cScatter","err":"Maximum call stack size exceeded"},"timestamp":1780691358236}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cROI"},"timestamp":1780691358258}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cROI","err":"Maximum call stack size exceeded"},"timestamp":1780691358260}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreGross"},"timestamp":1780691358280}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGenreGross","err":"Maximum call stack size exceeded"},"timestamp":1780691358282}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreROI"},"timestamp":1780691360733}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGenreROI","err":"Maximum call stack size exceeded"},"timestamp":1780691360735}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreScore"},"timestamp":1780691360748}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGenreScore","err":"Maximum call stack size exceeded"},"timestamp":1780691360751}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreTrends"},"timestamp":1780691360782}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGenreTrends","err":"Maximum call stack size exceeded"},"timestamp":1780691360783}
+{"sessionId":"c15644","hypothesisId":"H1","message":"chartTooltip el","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691879250}
+{"sessionId":"c15644","hypothesisId":"H2","message":"initOverview start","data":{},"timestamp":1780691879260}
+{"sessionId":"c15644","hypothesisId":"H2","message":"C.movies created","data":{"ok":true},"timestamp":1780691879383}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cMovies"},"timestamp":1780691879385}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-before","data":{"id":"cMovies"},"timestamp":1780691879386}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-after","data":{"id":"cMovies"},"timestamp":1780691879387}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cMovies","err":"Maximum call stack size exceeded"},"timestamp":1780691879390}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScores"},"timestamp":1780691879427}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-before","data":{"id":"cScores"},"timestamp":1780691879428}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-after","data":{"id":"cScores"},"timestamp":1780691879432}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cScores","err":"Maximum call stack size exceeded"},"timestamp":1780691879436}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGross"},"timestamp":1780691879479}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-before","data":{"id":"cGross"},"timestamp":1780691879483}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-after","data":{"id":"cGross"},"timestamp":1780691879489}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGross","err":"Maximum call stack size exceeded"},"timestamp":1780691879495}
+{"sessionId":"c15644","hypothesisId":"H1","message":"chartTooltip el","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780691883212}
+{"sessionId":"c15644","hypothesisId":"H2","message":"initOverview start","data":{},"timestamp":1780691883220}
+{"sessionId":"c15644","hypothesisId":"H2","message":"C.movies created","data":{"ok":true},"timestamp":1780691883279}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cMovies"},"timestamp":1780691883282}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-before","data":{"id":"cMovies"},"timestamp":1780691883285}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-after","data":{"id":"cMovies"},"timestamp":1780691883288}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cMovies","err":"Maximum call stack size exceeded"},"timestamp":1780691883291}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScores"},"timestamp":1780691883333}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-before","data":{"id":"cScores"},"timestamp":1780691883335}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-after","data":{"id":"cScores"},"timestamp":1780691883339}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cScores","err":"Maximum call stack size exceeded"},"timestamp":1780691883344}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGross"},"timestamp":1780691883379}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-after","data":{"id":"cGross"},"timestamp":1780691883385}
+{"sessionId":"c15644","hypothesisId":"H3","message":"step-A-before","data":{"id":"cGross"},"timestamp":1780691883383}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind THREW","data":{"id":"cGross","err":"Maximum call stack size exceeded"},"timestamp":1780691883389}
+{"sessionId":"c15644","hypothesisId":"H1","message":"chartTooltip el","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780692013892}
+{"sessionId":"c15644","hypothesisId":"H2","message":"initOverview start","data":{},"timestamp":1780692013899}
+{"sessionId":"c15644","hypothesisId":"H2","message":"C.movies created","data":{"ok":true},"timestamp":1780692013951}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cMovies"},"timestamp":1780692013952}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cMovies"},"timestamp":1780692013973}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScores"},"timestamp":1780692014000}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cScores"},"timestamp":1780692014020}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGross"},"timestamp":1780692014045}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cGross"},"timestamp":1780692014064}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":1,"dps":1},"timestamp":1780692019665}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":1,"dps":1},"timestamp":1780692019685}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":1,"dps":1},"timestamp":1780692019761}
+{"sessionId":"c15644","hypothesisId":"H1","message":"chartTooltip el","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780692022200}
+{"sessionId":"c15644","hypothesisId":"H2","message":"initOverview start","data":{},"timestamp":1780692022208}
+{"sessionId":"c15644","hypothesisId":"H2","message":"C.movies created","data":{"ok":true},"timestamp":1780692022267}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cMovies"},"timestamp":1780692022268}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cMovies"},"timestamp":1780692022292}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScores"},"timestamp":1780692022320}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cScores"},"timestamp":1780692022340}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGross"},"timestamp":1780692022369}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cGross"},"timestamp":1780692022389}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":1,"dps":1},"timestamp":1780692023824}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":1,"dps":1},"timestamp":1780692023839}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":1,"dps":1},"timestamp":1780692023877}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":0,"dps":1},"timestamp":1780692023911}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":1,"dps":1},"timestamp":1780692023927}
+{"sessionId":"c15644","hypothesisId":"H2","message":"showCustomTooltip","data":{"opacity":0,"dps":1},"timestamp":1780692023956}
+{"sessionId":"c15644","hypothesisId":"H1","message":"chartTooltip el","data":{"isNull":false,"id":"chart-tooltip"},"timestamp":1780692028271}
+{"sessionId":"c15644","hypothesisId":"H2","message":"initOverview start","data":{},"timestamp":1780692028275}
+{"sessionId":"c15644","hypothesisId":"H2","message":"C.movies created","data":{"ok":true},"timestamp":1780692028330}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cMovies"},"timestamp":1780692028332}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cMovies"},"timestamp":1780692028356}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScores"},"timestamp":1780692028388}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cScores"},"timestamp":1780692028405}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGross"},"timestamp":1780692028427}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cGross"},"timestamp":1780692028449}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cScatter"},"timestamp":1780692036315}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cScatter"},"timestamp":1780692036356}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cROI"},"timestamp":1780692036373}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cROI"},"timestamp":1780692036386}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreGross"},"timestamp":1780692036407}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cGenreGross"},"timestamp":1780692036418}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreROI"},"timestamp":1780692038769}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cGenreROI"},"timestamp":1780692038778}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreScore"},"timestamp":1780692038793}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cGenreScore"},"timestamp":1780692038803}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind start","data":{"id":"cGenreTrends"},"timestamp":1780692038826}
+{"sessionId":"c15644","hypothesisId":"H3","message":"bind OK","data":{"id":"cGenreTrends"},"timestamp":1780692038846}
