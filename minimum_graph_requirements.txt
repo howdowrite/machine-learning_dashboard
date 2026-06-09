@@ -1,0 +1,709 @@
+# Movie Intelligence Dashboard — Chart & Card UI/UX Standards
+#
+# Prescriptive requirements for every chart card in `generate_dashboard.py`.
+# Future charts should be buildable from this document alone.
+# Source of truth: patterns already implemented in the dashboard (as of current build).
+
+
+================================================================================
+1. CARD SHELL
+================================================================================
+
+Every visual chart lives inside a `.chart-card` container.
+
+Required structure (child order, top → bottom):
+
+  1. `.card-id-label`          — injected at boot; do not author in HTML template
+  2. `.chart-title-row`        — injected at boot; wraps title + action buttons
+       ├── `.chart-title`      — required; authored in HTML
+       └── `.chart-title-actions`
+            ├── `.chart-info-btn`   — injected when CHART_INFO entry exists
+            └── `.chart-zoom-btn`   — always injected
+  3. `.chart-caption`          — required one-liner
+  4. `.chart-fin-note`         — required when chart uses financial data (see §5)
+  5. `.chart-wrap`             — required; contains canvas or custom chart element
+       └── `<canvas id="cXxx">` or `<div id="cKw3">` etc.
+
+Optional modifiers:
+  - `.chart-card.wide` — spans full grid width (`grid-column: 1 / -1`)
+  - `.chart-wrap.tall` (300px), `.scatter-h` (400px), `.hbar` (380px), `.hbar-sm` (280px)
+  - Inline filter controls (`.era-knob-group`, `.dir-controls`) may sit between caption
+    and `.chart-wrap` on special cards (Era page)
+
+CSS baseline:
+  - `position: relative`
+  - `background: var(--surface)` (#1a1d27)
+  - `border: 1px solid var(--border)` (#2a2d3a)
+  - `border-radius: 8px`
+  - `padding: 16px 18px 12px`
+
+Charts are laid out in `.charts-grid` (2-column CSS grid, 1-column below 860px).
+
+
+================================================================================
+2. HEADER ROW
+================================================================================
+
+Card ID badge (`.card-id-label`):
+  - Format: `<tab-keyword>-<order-number>`
+  - Injected by boot script; order resets to 1 per page, top-to-bottom DOM order
+  - Tab keywords (PAGE_NAME_MAP):
+      overview, financial, genre, leaders, engagement, keywords, era
+  - Style: monospace, 10px, color #4e79a7, letter-spacing 0.08em
+  - Example: `overview-1`, `keywords-7`, `era-3`
+
+Title (`.chart-title`):
+  - Required on every chart card
+  - 13px, font-weight 600
+  - Short noun phrase naming the metric/view (e.g. "Movies Released per Year")
+
+Caption (`.chart-caption`):
+  - Required one-liner directly under title row
+  - 11px, color var(--muted) (#8892a4)
+  - States what is plotted, units, filters, and interaction hints
+  - Use middle-dot separators for compound facts: `X = IMDB score · Y = votes (thousands)`
+  - Mention log scale, jitter, or US-only scope here when applicable
+
+Title row injection:
+  - Boot script wraps `.chart-title` in `.chart-title-row` and appends `.chart-title-actions`
+  - Era cards with nested flex headers still expose a `.chart-title` descendant — injection works
+
+
+================================================================================
+3. INFO BUTTON (ⓘ)
+================================================================================
+
+Required on every chart that has a `CHART_INFO[canvasId]` entry.
+
+Placement:
+  - Inside `.chart-title-actions`, left of zoom button
+  - Class: `.chart-info-btn`
+  - Character: `ⓘ` (U+24D8)
+  - `title="Why this chart / What it shows"` (hover hint)
+
+Popup (`.chart-info-popup`):
+  - Appended as direct child of `.chart-card`, positioned absolute top-right
+  - Toggle: hover shows; click pins (`data-pinned="true"`); click outside dismisses
+  - Two sections, each with `.info-section`:
+      `.info-label` — uppercase 9px accent-colored heading
+      `.info-text`  — 12px body (#b8c0cc)
+
+Required popup content:
+  1. **Why this visualization?** — chart-type rationale, scale choices, encoding
+  2. **What it conveys** — insight the user should take away
+
+Optional third section (when relevant):
+  3. **Caveats** — data-source limits, currency filters, sparse-era warnings
+     (only `cKw7` currently uses `caveats` in CHART_INFO; new financial charts should)
+
+CHART_INFO registry:
+  - One entry per canvas/chart element ID (`cMovies`, `cKw9`, etc.)
+  - Add entry before shipping any new chart
+
+
+================================================================================
+4. ZOOM BUTTON (⤢)
+================================================================================
+
+Required on every chart card that contains a plottable element.
+
+Placement:
+  - `.chart-zoom-btn` in `.chart-title-actions`, rightmost
+  - Character: `⤢` (U+2922)
+  - `title="Expand chart"`
+
+Modal (`#zoom-modal`):
+  - Full-screen overlay `rgba(0,0,0,.75)`, z-index 10000
+  - `.zoom-modal-card` — scales from 0.95 → 1 on open
+  - Header: `.zoom-modal-title` (copied from `.chart-title`) + close `✕`
+  - Body: `#zoom-canvas` at 70vh height, `maintainAspectRatio: false`
+  - Close: ✕ button, backdrop click, Escape key
+  - Clones Chart.js instance via `CANVAS_TO_C` mapping + `JSON.parse(JSON.stringify(src.data))`
+  - Uses raw `src.config._config.options` (never Chart.js Proxy) to avoid stack overflow
+
+CANVAS_TO_C registration:
+  - Every Chart.js chart must register `canvasId → C.key` in `CANVAS_TO_C`
+  - Era rebuild charts register at end of `buildEraXxx()` functions
+  - Custom canvas charts must either implement zoom clone logic or disable the button
+
+
+================================================================================
+5. SPARSE / INCOMPLETE DATA WARNING
+================================================================================
+
+HTML warning (`.chart-fin-note`):
+  Required on any chart displaying budget, gross, or ROI data.
+
+  Exact template:
+    ⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable
+
+  Placement: after `.chart-caption`, before `.chart-wrap`
+  Style: 10px italic #5a6a82, left border 2px #2a2d3a
+
+  Charts that must include it (current set):
+    cGross, cScatter, cROI, cGenreGross, cGenreROI, cKw7, cKw8, cKw12, cEraComplete
+
+Canvas overlay (`incompleteYearPlugin`):
+  Required on every time-series chart whose X-axis uses release years and includes
+  the dataset's final year (2016).
+
+  Behaviors:
+    • Amber diagonal stripes + "⚠ partial" label on the rightmost year when label === '2016'
+      (dataset ends mid-2016)
+    • Gray shaded pre-1970 band on financial/sparse charts in SPARSE_BAND_CHARTS:
+        cMovies, cROI, cGross, cEraComplete, cEraYear, cKw12
+      Band labels:
+        - Financial charts: "← unreliable financial data (pre-1970)"
+        - Count charts:     "← sparse film data (pre-1970)"
+
+Page-level notes (not per-card, but related):
+  - `.dataset-note` on Overview and Era pages
+  - `.data-note` on Financial page
+  - `.fin-context-box` collapsible on Financial and Genre pages
+
+
+================================================================================
+6. TOOLTIPS
+================================================================================
+
+Global tooltip element: `#chart-tooltip`
+  - Fixed position, z-index 10001
+  - Background #1a1d27, border #2a2d3a, border-radius 10px
+  - Built by `buildTooltipHTML(title, value, films, fmt)`
+
+Chart.js charts — MUST use `bindExternalTooltip(chart, lookupFn)`:
+  - Disables native Chart.js tooltip (`enabled: false`)
+  - Routes to `showCustomTooltip` → `#chart-tooltip`
+  - Writes to `chart.config._config.options` (not Proxy) then `chart.update()`
+  - Adds `mouseleave` on canvas → `hideChartTooltip`
+
+Lookup function return shape:
+  `{ title, value, films, fmt }`
+  - `title`  — node label (year, genre, keyword, film title…)
+  - `value`  — primary metric string (accent-colored in header)
+  - `films`  — array of film objects for "Top films" section (may be null for point=film scatters)
+  - `fmt`    — optional `(film) => string` appended per film in summary lines
+
+Tooltip accent colors (`tooltipAccent`):
+  - Contains `$` → #59a14f (green)
+  - Contains `%` → #edc948 (yellow)
+  - Default      → #f28e2b (orange)
+
+Custom / canvas charts:
+  - Must implement their own hover handler
+  - Should reuse `#chart-tooltip` + `buildTooltipHTML` for consistency
+  - Must call `hideChartTooltip` on mouseleave
+
+
+================================================================================
+7. FILM SUMMARY LINES
+================================================================================
+
+When a data node represents an aggregate (year, genre, keyword, bucket…), the tooltip
+MUST list the constituent films in a "Top films" section.
+
+Rules:
+  - Show up to 5 films; if more exist, append italic footer:
+      "…and N more"
+  - Include ALL films that support the node — order by relevance to the metric (`fmt` badge)
+  - Never exclude a film solely because a field is missing; use em-dash placeholders
+  - Truncate title to 32 chars in badge layout (`truncTipTitle`); full title in list layout
+
+Standard film object fields (from `D` aggregates):
+  - `t`  — title (required for display; fallback "Unknown")
+  - `y` or `yr` — release year
+  - `s`  — IMDB score (display as ★{s} or —)
+  - `g`  — gross in millions (optional; fmt adds `· $XM`)
+  - votes — via `v` or engagement fields when relevant
+
+Display format (`kwFilmList`):
+  Line 1: {title}  (color #e2e8f0)
+  Line 2: {year} · ★{score}{extra from fmt}
+  Separator between films: 1px border #1e2130
+
+Badge layout (when `films[0].v` defined + `fmt` provided):
+  Title (truncated) + right-aligned metric badge (accent-colored pill)
+
+Point-level scatters (one dot = one film):
+  - May omit film list; show film identity in `title` + `value` instead
+  - Value should still include: title · year · score · gross · votes where available
+  - Example: `★8.2 · 1,234,567 votes · 1994`
+
+
+================================================================================
+8. CHART.JS CHARTS
+================================================================================
+
+Initialization pattern:
+  C.key = new Chart(document.getElementById("cXxx"), {
+    type: "...",
+    data: { ... },          // sourced from D object
+    options: merge(DEF, { ... })   // REQUIRED — never inline full options
+  });
+  bindExternalTooltip(C.key, lookupFn);
+
+DEF constant (do NOT re-declare inline):
+  - responsive: true, maintainAspectRatio: false, animation: false
+  - plugins.legend.labels.color: #8892a4
+  - plugins.tooltip: dark theme colors (overridden by bindExternalTooltip)
+  - scales.x/y: tick color #8892a4, grid #2a2d3a
+
+merge(a, b):
+  - Deep-merge utility; use for all per-chart option overrides
+  - Override only what differs from DEF
+
+Chart reference registry:
+  - All instances stored on global `C` object (e.g. `C.movies`, `C.kw12`)
+  - Referenced by `applyYearFilter` for live updates
+
+Registered plugins:
+  - `incompleteYearPlugin` — global; auto-applies to year-axis charts
+  - `valLabelPlugin` — opt-in via `plugins.valLabel: { show: true, fmt?: fn }`
+  - Custom per-chart plugins (e.g. `breakEvenPlugin` for cKw7) registered before chart creation
+
+Gradient fills:
+  - Use `mkGrad(canvasId, topColor, botColor)` for area charts
+
+
+================================================================================
+9. CANVAS / CUSTOM CHARTS
+================================================================================
+
+Current custom implementations: cKw3 (word cloud), cKw4 (box plot), cKw9 (network).
+
+Required patterns for new custom charts:
+
+  draw() function:
+    - Encapsulate all rendering; callable on resize and data/filter change
+    - Clear canvas with background `#12141f` before redraw
+
+  Responsive resize:
+    - `ResizeObserver` on `.chart-wrap` or parent container
+    - Set `canvas.width/height` from `parentElement.offsetWidth` × configured height
+    - Call `draw()` after resize
+
+  Hover handler:
+    - Hit-test nearest node/bar/word
+    - Populate `#chart-tooltip` via `buildTooltipHTML` with film summaries when aggregate
+
+  Info & zoom buttons:
+    - Provided by boot injection if element has `id` matching `CHART_INFO` key
+    - Custom charts must register zoom behavior or hide/disable zoom when unsupported
+
+  Data sourcing:
+    - Read exclusively from `D.*` fields prepared in Python
+
+
+================================================================================
+10. COLOR PALETTE
+================================================================================
+
+CSS theme variables:
+  --bg:      #0f1117
+  --surface: #1a1d27
+  --border:  #2a2d3a
+  --text:    #e2e8f0
+  --muted:   #8892a4
+  --accent:  #4e79a7
+  --accent2: #f28e2b
+
+Chart series palette (COLORS constant):
+  #4e79a7, #f28e2b, #e15759, #76b7b2, #59a14f, #edc948, #b07aa1, #ff9da7, #9c755f
+
+Semantic score colors (`scoreColor`):
+  ≥ 7.5 → rgba(89,161,79,α)   #59a14f green
+  ≥ 6.5 → rgba(78,121,167,α)  #4e79a7 blue
+  ≥ 5.0 → rgba(237,201,72,α)  #edc948 yellow
+  < 5.0 → rgba(225,87,89,α)   #e15759 red
+
+Financial / trend accents:
+  Gross/positive → #59a14f
+  Budget/primary → #4a9eff / #4e79a7
+  ROI/warning    → #edc948
+  Score trend    → #f28e2b
+
+Tooltip / popup backgrounds:
+  #1a1d27 (surface), borders #2a2d3a / #3a4050
+
+Canvas custom chart background: #12141f
+
+Era stacked-genre palette (ERA_GENRE_COLORS):
+  #4e79a7, #f28e2b, #e15759, #76b7b2, #59a14f, #edc948, #b07aa1, #ff9da7
+
+
+================================================================================
+11. incompleteYearPlugin
+================================================================================
+
+Apply to: any Chart.js chart with numeric year labels on the X-axis that includes
+the current/most-recent dataset year (2016).
+
+Already covered automatically via `Chart.register(incompleteYearPlugin)` — no per-chart
+registration needed.
+
+Verify chart canvas `id` is in SPARSE_BAND_CHARTS when financial/sparse pre-1970
+shading is required.
+
+Year-filter updates must preserve year-ordered labels so the plugin can detect 2016.
+
+
+================================================================================
+12. AXIS LABELS
+================================================================================
+
+Every axis MUST have `scales.{axis}.title.display: true` with descriptive text.
+
+Conventions:
+  - Year axis:  `text: "Year"` (or "Release year")
+  - Count axis: `text: "Film count"` / `"Films"` / `"Films per year"`
+  - Score axis: `text: "IMDB score"` with optional bucket legend in title
+  - Money axis: `text: "Gross (USD millions)"` / `"USD millions"` / `"$M"`
+  - ROI axis:   `text: "Avg ROI (%)"` with tick callback appending `%`
+  - Log scale:  MUST note in axis title, e.g. `"Budget (USD millions · log scale · …)"`
+
+Title style:
+  `color: "#8892a4", font: { size: 10–11 }`
+
+Dual Y-axes:
+  - Left/right positions with distinct colors matching series (e.g. y2 ROI in #edc948)
+  - `grid: { drawOnChartArea: false }` on secondary axis
+
+
+================================================================================
+13. LEGEND
+================================================================================
+
+Show legend when:
+  - Multiple datasets need disambiguation (genre trends, stacked bars, multi-line)
+  - Position: `top`, `bottom`, or `right` depending on chart aspect
+    • Wide time-series → `bottom` or `top`
+    • Doughnut (cRating) → `right`
+    • Stacked era charts → `bottom`
+
+Hide legend when:
+  - Single-series bar/line/area (set `plugins.legend.display: false`)
+  - Horizontal bars with y-axis category labels
+
+Legend label style:
+  `color: "#8892a4", font: { size: 9–11 }, boxWidth: 10–12`
+
+
+================================================================================
+14. RESPONSIVE LAYOUT
+================================================================================
+
+All charts inside `.chart-card`:
+  - `.chart-wrap` has fixed height class; width 100%
+  - Chart.js: `responsive: true, maintainAspectRatio: false` (via DEF)
+  - Custom canvas: `canvas.style.cssText = 'width:100%;height:100%'` + explicit pixel sizing
+  - Word cloud container: `<div id="cKw3" style="width:100%;height:100%">`
+
+Grid:
+  - `.charts-grid` 2-col → 1-col at max-width 860px
+  - `.chart-card.wide` collapses to single column on mobile
+
+Year filter and KPI rows follow same breakpoint (KPI 4-col → 2-col).
+
+
+================================================================================
+15. KPI CARDS
+================================================================================
+
+Structure (per page, inside `.kpi-row`):
+  <div class="kpi [accent|pos|warn]" data-tip="…explanation…">
+    <div class="kpi-label">METRIC NAME</div>
+    <div class="kpi-value" id="kpi-xxx">VALUE</div>
+    <div class="kpi-sub" id="kpi-xxx-sub">context line</div>  <!-- optional -->
+  </div>
+
+Rules:
+  - 4 KPIs per row (grid `repeat(4, 1fr)`)
+  - `data-tip` REQUIRED — hover tooltip explaining metric definition and caveats
+  - Tooltip via CSS `::after` pseudo-element (not Chart.js)
+  - Dynamic updates via `setKpi(id, text)` + `setKpiSub(id, text)` on year-filter change
+  - `kpi-updated` animation class on value change (600ms pulse)
+  - Modifier classes:
+      `.accent` — value color var(--accent)
+      `.pos`    — value color #59a14f
+      `.warn`   — value color var(--accent2)
+
+
+================================================================================
+16. LEADERBOARD CARDS
+================================================================================
+
+Leaderboard lives on `page-directors` (tab keyword `leaders` for card IDs).
+
+Structure:
+  - `.section-header` with h2 + description
+  - `.sub-tab-bar` / `.sub-tab` / `.sub-tab-panel` for Directors | Cast | Films | Impact
+  - `.dir-controls`:
+      • `.dir-search` input (placeholder varies per tab)
+      • `.date-reset-btn` (synced via `syncDateResetBtns()`)
+      • `.sort-btns` with `.sort-btn.active` OR `.film-sort-group` for Films tab
+  - `.dir-table-wrap` with optional `.dir-loading` overlay + `.spinner`
+  - `table.dir-table` (`.film-table`, `.impact-table` variants)
+  - `.dir-pagination`:
+      • `.pagination-info` — "Showing X–Y of Z" or "N films"
+      • `.page-btn` Prev/Next + `.page-indicator` "page / total"
+
+Films tab extras:
+  - `.film-filters` with `.film-filter-select` (genre, rating)
+  - `.film-sort-btn` + `.sort-dir-btn`
+
+Impact tab extras:
+  - `.impact-intro` explaining Cultural Impact Score formula
+  - `.impact-rank` badges (gold/silver/bronze/plain)
+
+Era "Top Film per Year" table (chart-card without canvas):
+  - Same search/sort/pagination patterns as leaderboards
+  - Wrapped in `.chart-card` with title + caption + `.dir-controls`
+
+Data:
+  - All rows built from `D` lists (`D.director_stats`, `D.films_list`, etc.)
+  - Filtered by `activeMin`/`activeMax` year range
+  - Paginated client-side (typically 15–25 rows per page)
+
+
+================================================================================
+17. TAB / PAGE STRUCTURE
+================================================================================
+
+Page container IDs: `page-{name}`
+  overview | financial | genre | directors | engagement | keywords | era
+
+Navigation:
+  - `.nav-btn` with `data-page="{name}"`
+  - `showPage(name)` hides all `.page`, shows `#page-{name}`, lazy-inits
+
+Init pattern:
+  const initPage = {
+    overview: initOverview,
+    financial: initFinancial,
+    ...
+  };
+  - First visit: `initPage[name](); INIT[name] = true;`
+  - Function name: `initXxx()` matching page purpose
+  - Chart instances created inside init, stored on `C`
+  - `applyYearFilter(lo, hi)` updates already-initialized charts
+
+Sub-tabs (Directors page):
+  - `data-subtab` on buttons; panels `id="sub-{name}"`
+
+
+================================================================================
+18. DATA SOURCING
+================================================================================
+
+All chart data MUST come from the embedded `D` JSON object:
+  const D = { ... };  // built in Python, injected at render time
+
+Rules:
+  - Never fetch external data at runtime
+  - Never hard-code film lists in JS — use `D.top_by_year`, `D.top_by_genre`, etc.
+  - Year filtering via `getYearSlice(lo, hi)` and domain-specific helpers
+  - Aggregations for tooltips precomputed in Python (`top_by_year`, `top_kw_freq[].films`, …)
+  - Leaderboard tables rebuild from `D.*_stats` / `D.films_list` arrays
+  - DOM manipulation limited to rendering derived views — not as a data store
+
+
+================================================================================
+19. ACCESSIBILITY
+================================================================================
+
+Required:
+  - `aria-label` on `.chart-info-btn` (e.g. "Chart information")
+  - `aria-label` on `.chart-zoom-btn` (e.g. "Expand chart")
+  - `aria-label` on `.zoom-modal-close` ("Close")
+  - `lang="en"` on `<html>` (already present)
+
+Recommended (existing patterns to extend):
+  - `title` attribute on buttons as supplementary hint
+  - `autocomplete="off"` on search inputs
+  - Table headers with scope implied by `<th>` in leaderboard tables
+  - `data-tip` KPI explanations serve as accessible descriptions on hover
+
+
+================================================================================
+20. DO-NOTS (ANTI-PATTERNS)
+================================================================================
+
+  ✗ Author `.card-id-label` or action buttons in HTML — boot script injects them
+  ✗ Create Chart.js options without `merge(DEF, {...})`
+  ✗ Re-declare DEF styling inline chart-by-chart
+  ✗ Use Chart.js built-in tooltip when `bindExternalTooltip` is available
+  ✗ Write to `chart.options` Proxy directly — use `chart.config._config.options`
+  ✗ JSON.stringify `chart.options` (triggers formatter callbacks → errors)
+  ✗ Omit film summaries on aggregate nodes that represent multiple films
+  ✗ Drop films from tooltip lists due to missing score/gross/votes
+  ✗ Show financial charts without `.chart-fin-note` HTML warning
+  ✗ Use linear scale for budget/gross spanning $0.5M–$6B without log scale note
+  ✗ Omit axis titles on any axis
+  ✗ Hard-code data arrays in JS instead of reading from `D`
+  ✗ Add charts without `CHART_INFO` entry (info button won't appear)
+  ✗ Register chart in HTML but omit from `CANVAS_TO_C` (zoom silently fails)
+  ✗ Use light/white chart backgrounds — stay on dark theme (#0f1117 / #1a1d27)
+  ✗ Create custom canvas charts without resize handling
+  ✗ Mutate source data in tooltips or filters (always copy/slice)
+
+
+================================================================================
+21. SCATTER PLOTS
+================================================================================
+
+Point-level scatter charts (one dot = one film) follow these patterns, as
+implemented on `cScatter` (Financial page) and keyword scatters `cKw5`, `cKw7`,
+`cKw13`.
+
+Jitter / dithering:
+  - Apply small random offsets to displayed x/y so exact-coordinate overlaps
+    separate visually
+  - Use deterministic per-film jitter (title-hash seed) so points stay stable
+    across hover/filter — not `Math.random()` on each render
+  - Store original coordinates as `ox` / `oy` (or `_jx` / `_jy` offsets) on
+    each point object; tooltips MUST read originals, not jittered display values
+  - Typical spreads:
+      • budget/gross log scatters: ±2.5% on x (and optionally y)
+      • duration scatters: ±2 minutes on x
+      • vote-axis bubbles: ±5% on x within genre clusters
+  - Mention jitter in `.chart-caption` and/or axis title when non-obvious
+
+Point styling:
+  - `pointRadius: 4`
+  - `pointHoverRadius: 7`
+  - `borderWidth: 0` (or minimal `pointBorderWidth` when needed for contrast)
+  - Semi-transparent fill: alpha 0.7
+      • score-colored: `scoreColor(score, 0.7)`
+      • genre-colored: palette hex + `b3` suffix (~70% opacity)
+      • density clusters (multi-genre financial scatter): lower alpha (~0.18)
+        so overlap reads as darker regions — exception to the 0.7 rule
+
+Tooltip (point = film):
+  - `films: null` — film identity lives in `title` + `value`, not a film list
+  - `value` field MUST include, when available:
+      title (in `title`) · year · ★score · financial/runtime fields · votes
+  - Examples:
+      • budget/gross: `Budget $XM · Gross $YM · ROI Z%` (use `ox`/`oy`)
+      • box office:   `year · ★score · $XM budget · $YM gross · genre`
+      • duration:     `year · N min · ★score · rating · $XM · votes`
+
+Color encoding:
+  - Score-driven scatters: `scoreColor(score, 0.7)` per point
+  - Genre-driven scatters: `COLORS[i]` mapped by primary genre at 0.7 alpha
+  - Bubble charts: keep `r` (radius) encoding for a third metric; jitter x only
+
+Break-even / reference lines:
+  - Diagonal break-even (budget = gross) or horizontal benchmarks via a custom
+    Chart.js plugin (e.g. `breakEvenPlugin` on `cKw7`, line dataset on `cScatter`)
+  - Register plugin with `Chart.register(...)` BEFORE chart creation
+  - Draw in `afterDraw` using chart scales to convert data values → pixels
+  - Style: `rgba(255,255,255,0.25)` or `#5a5d6a`, dashed `[5,5]` or `[6,4]`
+
+Axis scale:
+  - Budget/gross spanning $0.5M–$6B+ MUST use `type: 'logarithmic'` on both axes
+  - Axis title MUST note log scale, e.g.:
+      `"Budget (USD millions · log scale · ±2.5% jitter to reduce overplotting)"`
+  - Provide readable log tick callback (milestones only: 0.5, 1, 2, 5, 10, …)
+  - Linear scales acceptable for duration (minutes) and score (0–10) axes
+
+
+================================================================================
+APPENDIX A — COMPLIANCE GAPS (AUDIT OF CURRENT DASHBOARD)
+================================================================================
+
+Audit date: current `generate_dashboard.py` build. Standards above reflect existing
+patterns; gaps below are places the live dashboard does NOT yet meet them.
+
+── Missing or incomplete tooltip / film summary ──────────────────────────────
+
+  [cKw2] Genre Hierarchy
+    - No `bindExternalTooltip` registered — aggregate bars show no film list on hover
+
+  [cKw3] Keyword Word Cloud
+    - No hover handler; no film summaries; words are not interactive
+
+  [cKw4] Keyword Social Reach (box plot)
+    - No hover handler; no film summaries per keyword
+
+  [cKw9] Keyword Co-Occurrence Network
+    - No hover handler; nodes/edges not interactive
+
+  [cScatter] Budget vs Gross Scatter
+    - `films: null` — acceptable for point=film, but value line omits votes; no standard
+      `title · year · score · gross · votes` ordering (shows budget/gross/ROI only)
+
+  [cEngagement] Engagement vs Rating
+    - `films: null`; value uses `★score · votes · year` but omits gross
+
+  [cKw5] Genre Audience Engagement
+    - No `films` array; bubble = single genre aggregate, no film list
+
+  [cKw7] Box Office Scatter
+    - No `films` array; per-point film shown inline only (title + budget/gross/genre)
+
+  [cKw13] Duration vs Score
+    - No `films` array; inline film fields only (title, duration, score, rating)
+
+── Custom canvas charts — structural gaps vs §9 ────────────────────────────
+
+  [cKw3, cKw4, cKw9]
+    - No named `draw()` function (render logic is inline IIFE, not recallable)
+    - No `ResizeObserver` — charts do not redraw on container resize
+    - No hover/tooltip integration with `#chart-tooltip`
+
+── Zoom modal ──────────────────────────────────────────────────────────────
+
+  [cKw3, cKw4, cKw9]
+    - Zoom button renders (boot injection) but `CANVAS_TO_C` has no entry → click is no-op
+
+── Axis labels (§12) ───────────────────────────────────────────────────────
+
+  Missing explicit X-axis "Year" title:
+    cMovies, cScores, cGross, cROI, cGenreTrends, cKw12, cEraSummary, cEraYear (year mode),
+    cEraComplete (year mode), cEraGenreMix (year mode)
+
+  Missing axis titles on horizontal bar charts:
+    cKw1 (both axes), cKw2 (both axes), cKw6 (both axes), cGenreScore (Y categories),
+    cEraDecade (decade mode: Y decades unlabeled)
+
+── Accessibility (§19) ─────────────────────────────────────────────────────
+
+  Global: `.chart-info-btn`, `.chart-zoom-btn`, `.zoom-modal-close` use `title` only —
+    no `aria-label` attributes anywhere in the dashboard
+
+── Card shell / chrome ─────────────────────────────────────────────────────
+
+  [Era — Top Film per Year table card]
+    - Uses `.chart-card` but has no canvas/chart element → boot script skips info/zoom
+      injection entirely (no `.chart-title-row` wrapping)
+
+  [Era — Films Summary + grid charts]
+    - Title row injection may not wrap buttons when `.chart-title` sits inside nested
+      flex `<div>` (buttons still append, but layout differs from standard cards)
+
+  [Directors page card-id keyword]
+    - Page maps to `leaders` not `directors` — intentional but inconsistent with nav
+      `data-page="directors"`
+
+── Financial warnings ────────────────────────────────────────────────────────
+
+  [cScatter, cKw7]
+    - Log-scale noted in caption/axis title but axis titles could be clearer per §12
+    - Compliant on `.chart-fin-note` HTML requirement
+
+  [cGenreGross]
+    - Has fin-note; compliant
+
+── CHART_INFO caveats section ──────────────────────────────────────────────
+
+  Only cKw7 defines optional `caveats` in CHART_INFO; other financial charts (cGross,
+  cROI, cScatter, cKw12, cEraComplete) rely on `.chart-fin-note` HTML only — popup
+  does not repeat data-source caveats inside info panel.
+
+── Summary counts ────────────────────────────────────────────────────────────
+
+  Total chart cards with plottable elements: 30
+  Chart.js charts with bindExternalTooltip:     27 / 27 eligible (cKw2 is the sole miss)
+  Custom canvas charts meeting §9 fully:           0 / 3
+  Charts with non-functional zoom:                 3 (cKw3, cKw4, cKw9)
+  Leaderboard-style cards missing info/zoom:       1 (Era Top Film per Year table)
