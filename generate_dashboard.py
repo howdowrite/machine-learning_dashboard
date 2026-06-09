@@ -1,5 +1,6 @@
 import csv
 import json
+import math
 from collections import defaultdict
 
 CSV_PATH = "archive/movie_metadata.csv"
@@ -526,6 +527,119 @@ for r in rows:
         cr_val,
     ])
 
+# ── Era analysis aggregations ─────────────────────────────────────────────────
+
+era_map = defaultdict(lambda: {"count": 0, "has_budget": 0, "has_gross": 0, "has_both": 0, "scores": [], "top_film": None})
+for r in rows:
+    yr = to_int(r.get("title_year", "")) or 0
+    if not yr:
+        continue
+    t = r.get("movie_title", "").strip()
+    g = clean_g(to_float(r.get("gross", "")), t)
+    b = clean_b(to_float(r.get("budget", "")), t) if is_us_film(r) else None
+    sc = to_float(r.get("imdb_score", ""))
+    era_map[yr]["count"] += 1
+    if b:
+        era_map[yr]["has_budget"] += 1
+    if g:
+        era_map[yr]["has_gross"] += 1
+    if b and g:
+        era_map[yr]["has_both"] += 1
+    if sc:
+        era_map[yr]["scores"].append(sc)
+    if sc and (era_map[yr]["top_film"] is None or sc > era_map[yr]["top_film"]["score"]):
+        era_map[yr]["top_film"] = {
+            "title":    t,
+            "score":    sc,
+            "gross":    round(g / 1e6, 1) if g else None,
+            "genre":    r.get("genres", "").split("|")[0].strip() or "Other",
+            "director": r.get("director_name", "").strip() or "",
+            "rating":   r.get("content_rating", "").strip() or "Not Rated",
+        }
+
+era_data = []
+for yr in sorted(era_map):
+    d = era_map[yr]
+    cnt = d["count"]
+    scores = d["scores"]
+    era_data.append({
+        "year": yr,
+        "count": cnt,
+        "has_budget_pct": round(d["has_budget"] / cnt * 100, 1) if cnt else 0,
+        "has_gross_pct": round(d["has_gross"] / cnt * 100, 1) if cnt else 0,
+        "has_both_pct": round(d["has_both"] / cnt * 100, 1) if cnt else 0,
+        "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
+        "top_film": d["top_film"],
+    })
+
+decade_map = defaultdict(lambda: {"count": 0, "scores": [], "genres": defaultdict(int)})
+for r in rows:
+    yr = to_int(r.get("title_year", "")) or 0
+    if not yr:
+        continue
+    dec = (yr // 10) * 10
+    decade_map[dec]["count"] += 1
+    sc = to_float(r.get("imdb_score", ""))
+    if sc:
+        decade_map[dec]["scores"].append(sc)
+    genre = r.get("genres", "").split("|")[0].strip()
+    if genre:
+        decade_map[dec]["genres"][genre] += 1
+
+decade_data = []
+for dec in sorted(decade_map):
+    d = decade_map[dec]
+    cnt = d["count"]
+    scores = d["scores"]
+    top_genres = sorted(d["genres"].items(), key=lambda x: -x[1])[:8]
+    decade_data.append({
+        "decade": dec,
+        "label": f"{dec}s",
+        "count": cnt,
+        "avg_score": round(sum(scores) / len(scores), 2) if scores else None,
+        "genre_mix": {g: round(n / cnt * 100, 1) for g, n in top_genres},
+    })
+
+# -- Cultural Impact leaderboard: score × log10(votes) --
+_impact = []
+for r in rows:
+    s  = to_float(r.get("imdb_score", ""))
+    v  = to_int(r.get("num_voted_users", ""))
+    tt = r.get("movie_title", "").strip()
+    yr = to_int(r.get("title_year", "")) or 0
+    gn = r.get("genres", "").split("|")[0].strip() or "Other"
+    dr = r.get("director_name", "").strip()
+    if s and v and v > 0 and tt and yr:
+        _impact.append({
+            "t": _trunc(tt), "y": yr, "s": s, "v": v,
+            "genre": gn, "d": _trunc(dr),
+            "i": round(s * math.log10(v), 2),
+        })
+_impact.sort(key=lambda x: -x["i"])
+impact_top = _impact
+
+# -- Top 5 grossing films per year (any film with gross data, no minimum) --
+_gby = defaultdict(list)
+for r in rows:
+    g = to_float(r.get("gross", ""))
+    yr = to_int(r.get("title_year", "")) or 0
+    title = r.get("movie_title", "").strip()
+    if g and yr and title:
+        _gby[yr].append({"t": _trunc(title), "v": round(g / 1e6, 1)})
+top_gross_by_year = {yr: sorted(films, key=lambda x: -x["v"])[:5] for yr, films in _gby.items()}
+
+# -- Top 5 films per year by IMDb score (all films, no financial requirement) --
+_tfby = defaultdict(list)
+for r in rows:
+    title = r.get("movie_title", "").strip()
+    yr    = to_int(r.get("title_year", "")) or 0
+    sc    = to_float(r.get("imdb_score", ""))
+    gv    = to_float(r.get("gross", ""))
+    g     = round(gv / 1e6, 1) if gv else None
+    if title and yr and sc:
+        _tfby[yr].append({"t": _trunc(title), "v": sc, "g": g})
+top_films_by_year = {yr: sorted(fs, key=lambda x: -(x["v"] or 0))[:5] for yr, fs in _tfby.items()}
+
 # ── Pack data ─────────────────────────────────────────────────────────────────
 
 data = {
@@ -600,6 +714,11 @@ data = {
     "top_by_rating":      top_by_rating,
     "top_by_country":     top_by_country,
     "top_by_kw":          top_by_kw,
+    "era_data": era_data,
+    "decade_data": decade_data,
+    "top_gross_by_year": top_gross_by_year,
+    "top_films_by_year": top_films_by_year,
+    "impact_top": impact_top,
 }
 
 # ── Palette ───────────────────────────────────────────────────────────────────
@@ -704,22 +823,41 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
   -webkit-appearance: none; appearance: none;
   background: transparent; pointer-events: none;
   user-select: none; -webkit-user-select: none; -webkit-user-drag: none;
+  z-index: 3;
 }}
 .range-track input[type=range]::-webkit-slider-thumb {{
   -webkit-appearance: none; appearance: none;
-  width: 16px; height: 16px; border-radius: 50%;
+  width: 22px; height: 22px; border-radius: 50%;
   background: var(--accent); pointer-events: all;
   cursor: grab; border: 2px solid var(--bg); -webkit-user-drag: none;
 }}
 .range-track input[type=range]:active::-webkit-slider-thumb {{ cursor: grabbing; }}
 .range-track input[type=range]::-moz-range-thumb {{
-  width: 16px; height: 16px; border-radius: 50%;
+  width: 22px; height: 22px; border-radius: 50%;
   background: var(--accent); pointer-events: all;
   cursor: grab; border: 2px solid var(--bg);
 }}
 .range-fill {{
   position: absolute; height: 4px;
-  background: var(--accent); border-radius: 2px; pointer-events: none;
+  background: var(--accent); border-radius: 2px;
+  pointer-events: auto; cursor: grab; z-index: 1;
+}}
+.range-fill.dragging {{ cursor: grabbing; }}
+.range-fill-grip {{
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: #2a5080; border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 6px; padding: 5px 8px;
+  display: flex; align-items: center; justify-content: center; gap: 3px;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.55);
+  min-width: 30px;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+  transform-origin: center center;
+}}
+.range-fill-grip i {{
+  display: block; width: 2.5px; height: 11px;
+  background: rgba(255,255,255,0.7); border-radius: 2px;
 }}
 .range-bg {{
   position: absolute; width: 100%; height: 4px;
@@ -781,6 +919,36 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px 16px;
+  position: relative;
+}}
+.kpi[data-tip] {{ cursor: default; }}
+.kpi[data-tip] .kpi-label::after {{
+  content: ' ?';
+  color: #4e79a7; font-size: 9px; font-weight: 700;
+  vertical-align: super; opacity: 0.7;
+}}
+.kpi[data-tip]:hover::after {{
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%; transform: translateX(-50%);
+  background: #1a1d27; color: #c8d0dc;
+  border: 1px solid #3a4050;
+  font-size: 11.5px; line-height: 1.55;
+  padding: 8px 12px; border-radius: 7px;
+  width: 230px; text-align: left;
+  white-space: normal; z-index: 200;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.55);
+  pointer-events: none;
+}}
+.kpi[data-tip]:hover::before {{
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 4px); left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #3a4050;
+  z-index: 201; pointer-events: none;
 }}
 .kpi-label {{ font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 6px; }}
 .kpi-value {{ font-size: 22px; font-weight: 700; line-height: 1; }}
@@ -811,6 +979,16 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
   padding: 16px 18px 12px;
 }}
 .chart-card.wide {{ grid-column: 1 / -1; }}
+.card-id-label {{
+  font-family: monospace;
+  font-size: 10px;
+  color: #4e79a7;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 5px;
+  opacity: 0.85;
+  user-select: none;
+}}
 .chart-title   {{ font-size: 13px; font-weight: 600; margin-bottom: 3px; }}
 .chart-caption {{ font-size: 11px; color: var(--muted); margin-bottom: 12px; }}
 .chart-wrap                 {{ position: relative; height: 240px; }}
@@ -818,6 +996,41 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
 .chart-wrap.scatter-h       {{ height: 400px; }}
 .chart-wrap.hbar            {{ height: 380px; }}
 .chart-wrap.hbar-sm         {{ height: 280px; }}
+
+.dataset-note {{
+  color: #6b7a90; font-size: 11px; font-style: italic;
+  margin: -8px 0 16px; padding: 8px 12px;
+  border-left: 3px solid #2a2d3a; line-height: 1.5;
+}}
+
+.chart-fin-note {{
+  color: #5a6a82; font-size: 10px; font-style: italic;
+  margin: 2px 0 8px; padding: 3px 8px;
+  border-left: 2px solid #2a2d3a; line-height: 1.5;
+}}
+/* ── Impact Leaderboard ── */
+.impact-intro {{
+  background: rgba(78,121,167,.1); border: 1px solid rgba(78,121,167,.3);
+  border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #a0aec0;
+  margin-bottom: 4px; line-height: 1.6;
+}}
+.impact-intro strong {{ color: #4e79a7; }}
+.impact-table .impact-col {{ color: #f6c90e; font-weight: 700; }}
+.impact-rank {{ display:inline-block; width:28px; height:28px; border-radius:50%;
+  line-height:28px; text-align:center; font-size:11px; font-weight:700; }}
+.impact-rank.gold   {{ background:#b8860b; color:#fff5cc; }}
+.impact-rank.silver {{ background:#5a5a6a; color:#d0d0e0; }}
+.impact-rank.bronze {{ background:#7a4e2d; color:#f0d8b8; }}
+.impact-rank.plain  {{ background:#1e2235; color:#8892a4; }}
+.genre-pill {{
+  display:inline-block; padding:2px 7px; border-radius:10px; font-size:10px;
+  background:rgba(255,255,255,.07); color:#a0aec0; white-space:nowrap;
+}}
+.era-knob-group {{ display:flex; border:1px solid #2a2d3a; border-radius:6px; overflow:hidden; }}
+.era-knob {{ background:#0f1117; color:#8892a4; border:none; padding:5px 14px; font-size:11px; cursor:pointer; transition:background 0.15s,color 0.15s; }}
+.era-knob.active {{ background:#2a2d3a; color:#e2e8f0; }}
+.era-knob:hover:not(.active) {{ background:#1a1d27; }}
+.era-filter-notice {{ font-size:10px; color:#4e79a7; font-style:italic; opacity:0.85; }}
 
 /* ── Data disclaimer note ── */
 .data-note {{
@@ -830,6 +1043,29 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
   padding: 8px 14px;
   margin-bottom: 14px;
 }}
+.fin-context-box {{
+  background: rgba(78,121,167,0.06);
+  border: 1px solid rgba(78,121,167,0.2);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 11.5px;
+  color: #8892a4;
+}}
+.fin-context-box summary {{
+  padding: 9px 14px; cursor: pointer;
+  font-weight: 600; color: #6a9fc4;
+  list-style: none; display: flex; align-items: center; gap: 6px;
+  user-select: none;
+}}
+.fin-context-box summary::-webkit-details-marker {{ display: none; }}
+.fin-context-box[open] summary {{ border-bottom: 1px solid rgba(78,121,167,0.18); }}
+.fin-context-box summary::before {{ content: '▶'; font-size: 8px; transition: transform 0.2s; display: inline-block; }}
+.fin-context-box[open] summary::before {{ transform: rotate(90deg); }}
+.fin-context-box .fcb-body {{ padding: 10px 14px 12px; line-height: 1.65; }}
+.fin-context-box ul {{ margin: 0; padding-left: 18px; }}
+.fin-context-box li {{ margin-bottom: 7px; }}
+.fin-context-box li:last-child {{ margin-bottom: 0; }}
+.fin-context-box strong {{ color: #a8c4dc; font-weight: 600; }}
 
 /* ── Chart info popup ── */
 .chart-title-row {{
@@ -1022,17 +1258,26 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
 .film-filter-select:focus {{ border-color: var(--accent); }}
 .film-sort-group {{ display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }}
 .film-sort-label {{ font-size: 11px; color: var(--muted); margin-right: 2px; }}
-.film-sort-btn {{
+.film-sort-btn, .era-sort-btn {{
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 6px; color: var(--muted); font-size: 11px; padding: 5px 10px; cursor: pointer;
 }}
 .film-sort-btn.active {{ border-color: #59a14f; color: #59a14f; }}
+.era-sort-btn.active  {{ border-color: #4e79a7; color: #4e79a7; }}
 .sort-dir-btn {{
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 6px; color: var(--muted); font-size: 11px; padding: 5px 8px; cursor: pointer;
   min-width: 28px;
 }}
 .sort-dir-btn:hover {{ border-color: var(--accent); color: var(--accent); }}
+.date-reset-btn {{
+  background: rgba(237,201,72,.08); border: 1px solid rgba(237,201,72,.3);
+  border-radius: 6px; color: #edc948; font-size: 11px; padding: 5px 11px;
+  cursor: pointer; white-space: nowrap; transition: background .15s, opacity .15s;
+  margin-left: auto;
+}}
+.date-reset-btn:hover:not(:disabled) {{ background: rgba(237,201,72,.18); }}
+.date-reset-btn:disabled {{ opacity: 0.35; cursor: default; }}
 .role-pill {{
   display: inline-block; font-size: 11px; border-radius: 4px; padding: 1px 6px;
 }}
@@ -1066,7 +1311,7 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
     <div class="range-track-outer">
       <div class="range-track" id="rangeTrack">
         <div class="range-bg"></div>
-        <div class="range-fill" id="rangeFill"></div>
+        <div class="range-fill" id="rangeFill"><div class="range-fill-grip"><i></i><i></i><i></i></div></div>
         <span class="thumb-tip" id="tipMin" draggable="false">1916</span>
         <span class="thumb-tip" id="tipMax" draggable="false">2016</span>
         <input type="range" id="yrMin" min="1916" max="2016" value="1916" step="1"/>
@@ -1084,52 +1329,70 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
   <button class="nav-btn active" data-page="overview">Overview</button>
   <button class="nav-btn" data-page="financial">Financial Performance</button>
   <button class="nav-btn" data-page="genre">Genre Intelligence</button>
-  <button class="nav-btn" data-page="directors">Director &amp; Cast</button>
+  <button class="nav-btn" data-page="directors">Leaderboard</button>
   <button class="nav-btn" data-page="engagement">Audience Engagement</button>
   <button class="nav-btn" data-page="keywords">Keywords &amp; Reach</button>
+  <button class="nav-btn" data-page="era">Era Analysis</button>
 </nav>
 
 <!-- ─────────────────────────── PAGE: OVERVIEW ─────────────────────────────── -->
 <div class="page active" id="page-overview">
   <div class="kpi-row">
-    <div class="kpi"><div class="kpi-label">Total Films</div><div class="kpi-value" id="kpi-total-films">{total_films:,}</div><div class="kpi-sub" id="kpi-total-films-sub">in selected range</div></div>
-    <div class="kpi accent"><div class="kpi-label">Avg IMDB Score</div><div class="kpi-value" id="kpi-avg-score">{global_avg_score}</div><div class="kpi-sub" id="kpi-avg-score-sub">in selected range</div></div>
-    <div class="kpi"><div class="kpi-label">Total Gross</div><div class="kpi-value" id="kpi-total-gross" style="font-size:18px">${int(sum(g for g in total_gross_yr if g)):,}M</div><div class="kpi-sub" id="kpi-total-gross-sub">USD in selected range</div></div>
-    <div class="kpi"><div class="kpi-label">Avg Budget</div><div class="kpi-value" id="kpi-avg-budget" style="font-size:18px">${round(sum(b for b in avg_budget_yr if b)/len([b for b in avg_budget_yr if b]),1) if [b for b in avg_budget_yr if b] else 0}M</div><div class="kpi-sub" id="kpi-avg-budget-sub">US productions only</div></div>
+    <div class="kpi" data-tip="How many films in the dataset fall within your selected year range."><div class="kpi-label">Total Films</div><div class="kpi-value" id="kpi-total-films">{total_films:,}</div><div class="kpi-sub" id="kpi-total-films-sub">in selected range</div></div>
+    <div class="kpi accent" data-tip="Mean IMDb user rating (out of 10) for all films in the selected range."><div class="kpi-label">Avg IMDB Score</div><div class="kpi-value" id="kpi-avg-score">{global_avg_score}</div><div class="kpi-sub" id="kpi-avg-score-sub">in selected range</div></div>
+    <div class="kpi" data-tip="Sum of reported US domestic box office gross across the range. Many films lack gross data — this only covers those that have it."><div class="kpi-label">Total Gross</div><div class="kpi-value" id="kpi-total-gross" style="font-size:18px">${int(sum(g for g in total_gross_yr if g)):,}M</div><div class="kpi-sub" id="kpi-total-gross-sub">USD in selected range</div></div>
+    <div class="kpi" data-tip="Mean reported production budget. Restricted to US productions to avoid currency mismatch errors with international films."><div class="kpi-label">Avg Budget</div><div class="kpi-value" id="kpi-avg-budget" style="font-size:18px">${round(sum(b for b in avg_budget_yr if b)/len([b for b in avg_budget_yr if b]),1) if [b for b in avg_budget_yr if b] else 0}M</div><div class="kpi-sub" id="kpi-avg-budget-sub">US productions only</div></div>
   </div>
+  <p class="dataset-note">Dataset note: ~5,000 films scraped from IMDb, biased toward financially documented post-1970 productions. Pre-1960 years are significantly underrepresented and financial metrics for that era should be treated as incomplete.</p>
   <div class="charts-grid">
     <div class="chart-card"><div class="chart-title">Movies Released per Year</div><div class="chart-caption">Film count by release year</div><div class="chart-wrap"><canvas id="cMovies"></canvas></div></div>
     <div class="chart-card"><div class="chart-title">Average IMDB Score per Year</div><div class="chart-caption">Mean user rating over time</div><div class="chart-wrap"><canvas id="cScores"></canvas></div></div>
-    <div class="chart-card wide"><div class="chart-title">Total Box Office Gross per Year</div><div class="chart-caption">Sum of reported gross revenue (USD millions)</div><div class="chart-wrap tall"><canvas id="cGross"></canvas></div></div>
+    <div class="chart-card wide"><div class="chart-title">Total Box Office Gross per Year</div><div class="chart-caption">Sum of reported gross revenue (USD millions)</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap tall"><canvas id="cGross"></canvas></div></div>
   </div>
 </div>
 
 <!-- ─────────────────────────── PAGE: FINANCIAL ────────────────────────────── -->
 <div class="page" id="page-financial">
   <div class="kpi-row">
-    <div class="kpi"><div class="kpi-label">Films Analyzed</div><div class="kpi-value" id="kpi-scatter-pts">{len(scatter_data):,}</div><div class="kpi-sub" id="kpi-scatter-pts-sub">US productions with budget &amp; gross</div></div>
-    <div class="kpi warn"><div class="kpi-label">Avg ROI</div><div class="kpi-value" id="kpi-avg-roi">{avg_roi_global:+.0f}%</div><div class="kpi-sub">gross vs budget</div></div>
-    <div class="kpi pos"><div class="kpi-label">Profitable</div><div class="kpi-value" id="kpi-profitable-pct">{round(profitable_count/len(scatter_data)*100) if scatter_data else 0}%</div><div class="kpi-sub" id="kpi-profitable-pct-sub">of analyzed films</div></div>
-    <div class="kpi"><div class="kpi-label">Best ROI Genre</div><div class="kpi-value" id="kpi-top-roi-genre" style="font-size:16px">{best_roi_genre['genre']}</div><div class="kpi-sub" id="kpi-top-roi-genre-sub">{best_roi_genre['avg_roi']:+.0f}% avg ROI</div></div>
+    <div class="kpi" data-tip="US productions that have BOTH a budget and gross figure recorded — the subset used for ROI and scatter analysis."><div class="kpi-label">Films Analyzed</div><div class="kpi-value" id="kpi-scatter-pts">{len(scatter_data):,}</div><div class="kpi-sub" id="kpi-scatter-pts-sub">US productions with budget &amp; gross</div></div>
+    <div class="kpi warn" data-tip="Average return on investment: (Gross - Budget) / Budget, averaged across all analyzed films. Each film ROI is capped at 1000% to limit outlier distortion."><div class="kpi-label">Avg ROI</div><div class="kpi-value" id="kpi-avg-roi">{avg_roi_global:+.0f}%</div><div class="kpi-sub">gross vs budget</div></div>
+    <div class="kpi pos" data-tip="Share of analyzed films where box office gross exceeded the reported production budget (ROI > 0%)."><div class="kpi-label">Profitable</div><div class="kpi-value" id="kpi-profitable-pct">{round(profitable_count/len(scatter_data)*100) if scatter_data else 0}%</div><div class="kpi-sub" id="kpi-profitable-pct-sub">of analyzed films</div></div>
+    <div class="kpi" data-tip="Genre with the highest average ROI across its films. Requires at least 5 films with complete financial data. Calculated per-film first, then averaged per genre."><div class="kpi-label">Best ROI Genre</div><div class="kpi-value" id="kpi-top-roi-genre" style="font-size:16px">{best_roi_genre['genre']}</div><div class="kpi-sub" id="kpi-top-roi-genre-sub">{best_roi_genre['avg_roi']:+.0f}% avg ROI</div></div>
   </div>
   <div class="data-note">⚠ Budget figures restricted to US productions only. Non-US films record budgets in local currency (JPY, EUR, INR…) while gross is US domestic (USD), making direct ROI comparison invalid. Gross revenue charts include all countries.</div>
+  <details class="fin-context-box">
+    <summary>ℹ About this financial data</summary>
+    <div class="fcb-body"><ul>
+      <li><strong>IMDb-scraped, not a financial database.</strong> Budget and gross figures are optional fields on IMDb — studios aren't required to disclose them. Many well-documented modern films simply never had numbers entered.</li>
+      <li><strong>"Complete" means BOTH budget AND gross.</strong> A film can have gross data but no budget (common for smaller films where box office is tracked but production costs weren't disclosed). ~50% completeness post-1970 doesn't mean the data is bad — half the films are simply missing one or both figures.</li>
+      <li><strong>Dataset skews toward notable films.</strong> ~5,000 films were selected based on popularity/notability, not financial completeness. Indie films, foreign co-productions, and direct-to-video releases are included but rarely have budget figures.</li>
+    </ul></div>
+  </details>
   <div class="charts-grid">
-    <div class="chart-card wide"><div class="chart-title">Budget vs Gross — Scatter</div><div class="chart-caption">US productions only · log scale · ±2.5% jitter · darker = denser cluster · hover for details</div><div class="chart-wrap scatter-h"><canvas id="cScatter"></canvas></div></div>
-    <div class="chart-card"><div class="chart-title">Average ROI per Year</div><div class="chart-caption">Mean per-film ROI averaged by year · US productions only</div><div class="chart-wrap"><canvas id="cROI"></canvas></div></div>
-    <div class="chart-card"><div class="chart-title">Top Genres by Avg Gross</div><div class="chart-caption">Mean reported gross revenue per film (USD millions)</div><div class="chart-wrap hbar-sm"><canvas id="cGenreGross"></canvas></div></div>
+    <div class="chart-card wide"><div class="chart-title">Budget vs Gross — Scatter</div><div class="chart-caption">US productions only · log scale · ±2.5% jitter · darker = denser cluster · hover for details</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap scatter-h"><canvas id="cScatter"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Average ROI per Year</div><div class="chart-caption">Mean per-film ROI averaged by year · US productions only</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap"><canvas id="cROI"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Top Genres by Avg Gross</div><div class="chart-caption">Mean reported gross revenue per film (USD millions)</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap hbar-sm"><canvas id="cGenreGross"></canvas></div></div>
   </div>
 </div>
 
 <!-- ─────────────────────────── PAGE: GENRE ────────────────────────────────── -->
 <div class="page" id="page-genre">
   <div class="kpi-row">
-    <div class="kpi accent"><div class="kpi-label">Top Gross Genre</div><div class="kpi-value" id="kpi-top-gross-genre" style="font-size:16px">{top_gross_genre['genre']}</div><div class="kpi-sub" id="kpi-top-gross-genre-sub">${top_gross_genre['avg_gross']:.0f}M avg gross</div></div>
-    <div class="kpi pos"><div class="kpi-label">Best ROI Genre</div><div class="kpi-value" id="kpi-best-roi-genre" style="font-size:16px">{best_roi_genre['genre']}</div><div class="kpi-sub" id="kpi-best-roi-genre-sub">{best_roi_genre['avg_roi']:+.0f}% avg ROI</div></div>
-    <div class="kpi"><div class="kpi-label">Top Rated Genre</div><div class="kpi-value" id="kpi-top-rated-genre" style="font-size:16px">{top_rated_genre['genre']}</div><div class="kpi-sub" id="kpi-top-rated-genre-sub">{top_rated_genre['avg_score']} avg score</div></div>
-    <div class="kpi"><div class="kpi-label">Most Common Genre</div><div class="kpi-value" id="kpi-most-common-genre" style="font-size:16px">{most_common_genre['genre']}</div><div class="kpi-sub" id="kpi-most-common-genre-sub">{most_common_genre['count']:,} films</div></div>
+    <div class="kpi accent" data-tip="Genre whose films earn the most on average at the box office (mean gross revenue per film, US productions only)."><div class="kpi-label">Top Gross Genre</div><div class="kpi-value" id="kpi-top-gross-genre" style="font-size:16px">{top_gross_genre['genre']}</div><div class="kpi-sub" id="kpi-top-gross-genre-sub">${top_gross_genre['avg_gross']:.0f}M avg gross</div></div>
+    <div class="kpi pos" data-tip="Genre with the best average return on investment. Calculated from US productions with both budget and gross data. Requires at least 5 qualifying films."><div class="kpi-label">Best ROI Genre</div><div class="kpi-value" id="kpi-best-roi-genre" style="font-size:16px">{best_roi_genre['genre']}</div><div class="kpi-sub" id="kpi-best-roi-genre-sub">{best_roi_genre['avg_roi']:+.0f}% avg ROI</div></div>
+    <div class="kpi" data-tip="Genre with the highest average IMDb user score across its films."><div class="kpi-label">Top Rated Genre</div><div class="kpi-value" id="kpi-top-rated-genre" style="font-size:16px">{top_rated_genre['genre']}</div><div class="kpi-sub" id="kpi-top-rated-genre-sub">{top_rated_genre['avg_score']} avg score</div></div>
+    <div class="kpi" data-tip="Genre that appears most often as the primary genre tag across all films in the dataset (not filtered by year range)."><div class="kpi-label">Most Common Genre</div><div class="kpi-value" id="kpi-most-common-genre" style="font-size:16px">{most_common_genre['genre']}</div><div class="kpi-sub" id="kpi-most-common-genre-sub">{most_common_genre['count']:,} films</div></div>
   </div>
+  <details class="fin-context-box">
+    <summary>ℹ About this financial data</summary>
+    <div class="fcb-body"><ul>
+      <li><strong>IMDb-scraped, not a financial database.</strong> Budget and gross figures are optional fields on IMDb — studios aren't required to disclose them. Many well-documented modern films simply never had numbers entered.</li>
+      <li><strong>"Complete" means BOTH budget AND gross.</strong> A film can have gross data but no budget (common for smaller films where box office is tracked but production costs weren't disclosed). ~50% completeness post-1970 doesn't mean the data is bad — half the films are simply missing one or both figures.</li>
+      <li><strong>Dataset skews toward notable films.</strong> ~5,000 films were selected based on popularity/notability, not financial completeness. Indie films, foreign co-productions, and direct-to-video releases are included but rarely have budget figures.</li>
+    </ul></div>
+  </details>
   <div class="charts-grid">
-    <div class="chart-card"><div class="chart-title">Genre Profitability (Avg ROI)</div><div class="chart-caption">Avg of per-film ROI by genre · US productions only · all years</div><div class="chart-wrap hbar"><canvas id="cGenreROI"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Genre Profitability (Avg ROI)</div><div class="chart-caption">Avg of per-film ROI by genre · US productions only · all years</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap hbar"><canvas id="cGenreROI"></canvas></div></div>
     <div class="chart-card"><div class="chart-title">Genre Avg IMDB Score</div><div class="chart-caption">Mean user rating per genre · all years</div><div class="chart-wrap hbar"><canvas id="cGenreScore"></canvas></div></div>
     <div class="chart-card wide"><div class="chart-title">Genre Trends Over Time</div><div class="chart-caption">Film count by primary genre per year · responds to year filter</div><div class="chart-wrap tall"><canvas id="cGenreTrends"></canvas></div></div>
   </div>
@@ -1138,20 +1401,22 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
 <!-- ─────────────────────────── PAGE: DIRECTORS ────────────────────────────── -->
 <div class="page" id="page-directors">
   <div class="section-header">
-    <h2>Director &amp; Cast Analytics</h2>
-    <p>Leaderboards for directors, actors, and individual films · stats reflect active year range</p>
+    <h2>Leaderboard</h2>
+    <p>Leaderboards for directors, actors, films, and cultural impact · stats reflect active year range</p>
   </div>
 
   <nav class="sub-tab-bar">
     <button class="sub-tab active" data-subtab="directors">Directors</button>
     <button class="sub-tab" data-subtab="cast">Cast (Actors)</button>
     <button class="sub-tab" data-subtab="films">Films</button>
+    <button class="sub-tab" data-subtab="impact">Cultural Impact ⚡</button>
   </nav>
 
   <!-- Directors tab -->
   <div id="sub-directors" class="sub-tab-panel active">
     <div class="dir-controls">
       <input class="dir-search" id="dirSearch" type="text" placeholder="Search directors..." autocomplete="off"/>
+      <button class="date-reset-btn" id="drDateReset" onclick="triggerDateReset()" title="Reset year range to full dataset">↺ Date Filter Reset</button>
       <div class="sort-btns" id="dirSortBtns">
         <button class="sort-btn active" data-sort="gross">Total Gross</button>
         <button class="sort-btn" data-sort="score">Avg Score</button>
@@ -1186,6 +1451,7 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
   <div id="sub-cast" class="sub-tab-panel">
     <div class="dir-controls">
       <input class="dir-search" id="actorSearch" type="text" placeholder="Search actors..." autocomplete="off"/>
+      <button class="date-reset-btn" id="castDateReset" onclick="triggerDateReset()" title="Reset year range to full dataset">↺ Date Filter Reset</button>
       <div class="sort-btns" id="actorSortBtns">
         <button class="sort-btn active" data-sort="gross">Total Gross</button>
         <button class="sort-btn" data-sort="score">Avg Score</button>
@@ -1220,6 +1486,7 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
   <div id="sub-films" class="sub-tab-panel">
     <div class="dir-controls">
       <input class="dir-search" id="filmSearch" type="text" placeholder="Search title or director..." autocomplete="off"/>
+      <button class="date-reset-btn" id="filmDateReset" onclick="triggerDateReset()" title="Reset year range to full dataset">↺ Date Filter Reset</button>
     </div>
     <div class="film-filters">
       <select class="film-filter-select" id="filmGenreFilter">
@@ -1270,15 +1537,58 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
       </div>
     </div>
   </div>
+
+  <!-- Impact Leaderboard tab -->
+  <div id="sub-impact" class="sub-tab-panel">
+    <div class="impact-intro">
+      <strong>Cultural Impact Score</strong> = IMDb Score × log₁₀(Vote Count)
+      &nbsp;—&nbsp; rewards films that are <em>both</em> highly rated <em>and</em> widely watched.
+      A 9.0 with 2 million votes outranks a 9.5 with only 10,000 votes.
+    </div>
+    <div class="dir-controls" style="margin-top:10px">
+      <input class="dir-search" id="impactSearch" type="text" placeholder="Search title or director..." autocomplete="off"/>
+      <button class="date-reset-btn" id="impactDateReset" onclick="triggerDateReset()" title="Reset year range to full dataset">↺ Date Filter Reset</button>
+      <div class="sort-btns" id="impactSortBtns">
+        <button class="sort-btn active" data-isort="impact">Impact Score</button>
+        <button class="sort-btn" data-isort="score">IMDb Score</button>
+        <button class="sort-btn" data-isort="votes">Vote Count</button>
+        <button class="sort-btn" data-isort="year">Year</button>
+      </div>
+    </div>
+    <div class="dir-table-wrap">
+      <div class="dir-loading" id="impactLoading"><div class="spinner"></div><span>Calculating...</span></div>
+      <table class="dir-table impact-table">
+        <thead><tr>
+          <th style="width:44px">#</th>
+          <th>Title</th>
+          <th class="num">Year</th>
+          <th>Genre</th>
+          <th>Director</th>
+          <th class="num">Score ★</th>
+          <th class="num">Votes</th>
+          <th class="num impact-col">Impact ⚡</th>
+        </tr></thead>
+        <tbody id="impactTbody"></tbody>
+      </table>
+    </div>
+    <div class="dir-pagination">
+      <span class="pagination-info" id="impactPageInfo"></span>
+      <div class="pagination-btns">
+        <button class="page-btn" id="impactPagePrev">&#8592; Prev</button>
+        <span class="page-indicator" id="impactPageIndicator"></span>
+        <button class="page-btn" id="impactPageNext">Next &#8594;</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ─────────────────────────── PAGE: ENGAGEMENT ──────────────────────────── -->
 <div class="page" id="page-engagement">
   <div class="kpi-row">
-    <div class="kpi accent"><div class="kpi-label">Avg Votes / Film</div><div class="kpi-value" id="kpi-avg-votes">{avg_votes:,}</div><div class="kpi-sub">num_voted_users</div></div>
-    <div class="kpi pos"><div class="kpi-label">High Score Films</div><div class="kpi-value" id="kpi-high-score-pct">{round(sum(1 for r in rows if to_float(r.get('imdb_score','')) and to_float(r.get('imdb_score',''))>=7.5)/len(all_scores)*100) if all_scores else 0}%</div><div class="kpi-sub" id="kpi-high-score-pct-sub">score ≥ 7.5</div></div>
-    <div class="kpi"><div class="kpi-label">Top Rated Film</div><div class="kpi-value" id="kpi-top-rated-kpi" style="font-size:13px;line-height:1.3">{films_list[0]['t'][:28]}{'…' if len(films_list[0]['t'])>28 else ''}</div><div class="kpi-sub" id="kpi-top-rated-kpi-sub">★{films_list[0]['s'] or '—'}</div></div>
-    <div class="kpi"><div class="kpi-label">Most Voted Film</div><div class="kpi-value" id="kpi-top-votes-kpi" style="font-size:13px;line-height:1.3">{top_voted_title[:28]}{'…' if len(top_voted_title)>28 else ''}</div><div class="kpi-sub" id="kpi-top-votes-kpi-sub">{top_voted_n:,} votes</div></div>
+    <div class="kpi accent" data-tip="Average number of IMDb user ratings per film in the selected range — a proxy for audience reach. More votes generally means more widely seen."><div class="kpi-label">Avg Votes / Film</div><div class="kpi-value" id="kpi-avg-votes">{avg_votes:,}</div><div class="kpi-sub">num_voted_users</div></div>
+    <div class="kpi pos" data-tip="Percentage of films with an IMDb score of 7.5 or above — a common threshold considered highly rated."><div class="kpi-label">High Score Films</div><div class="kpi-value" id="kpi-high-score-pct">{round(sum(1 for r in rows if to_float(r.get('imdb_score','')) and to_float(r.get('imdb_score',''))>=7.5)/len(all_scores)*100) if all_scores else 0}%</div><div class="kpi-sub" id="kpi-high-score-pct-sub">score ≥ 7.5</div></div>
+    <div class="kpi" data-tip="Film with the single highest IMDb user score in the selected year range."><div class="kpi-label">Top Rated Film</div><div class="kpi-value" id="kpi-top-rated-kpi" style="font-size:13px;line-height:1.3">{films_list[0]['t'][:28]}{'…' if len(films_list[0]['t'])>28 else ''}</div><div class="kpi-sub" id="kpi-top-rated-kpi-sub">★{films_list[0]['s'] or '—'}</div></div>
+    <div class="kpi" data-tip="Film with the most IMDb user votes in the selected range — the most widely rated and likely most widely watched."><div class="kpi-label">Most Voted Film</div><div class="kpi-value" id="kpi-top-votes-kpi" style="font-size:13px;line-height:1.3">{top_voted_title[:28]}{'…' if len(top_voted_title)>28 else ''}</div><div class="kpi-sub" id="kpi-top-votes-kpi-sub">{top_voted_n:,} votes</div></div>
   </div>
   <div class="charts-grid">
     <div class="chart-card wide"><div class="chart-title">Engagement vs Rating — Scatter</div><div class="chart-caption">Each dot = one film · X = IMDB score · Y = votes (thousands) · hover for title</div><div class="chart-wrap scatter-h"><canvas id="cEngagement"></canvas></div></div>
@@ -1290,15 +1600,122 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
 <!-- ─────────────────────────── PAGE: KEYWORDS ────────────────────────────── -->
 <div class="page" id="page-keywords">
   <div class="kpi-row">
-    <div class="kpi"><div class="kpi-label">Unique Keywords</div><div class="kpi-value" id="kpi-unique-kw">{total_kw:,}</div><div class="kpi-sub" id="kpi-unique-kw-sub">in selected range</div></div>
-    <div class="kpi"><div class="kpi-label">Films with Keywords</div><div class="kpi-value" id="kpi-films-with-kw">{films_with_kw:,}</div><div class="kpi-sub" id="kpi-films-with-kw-sub">in selected range</div></div>
-    <div class="kpi accent"><div class="kpi-label">Most Used Keyword</div><div class="kpi-value" id="kpi-top-kw" style="font-size:15px">{kw_freq[0][0] if kw_freq else 'N/A'}</div><div class="kpi-sub" id="kpi-top-kw-sub">{kw_freq[0][1] if kw_freq else 0:,} films</div></div>
-    <div class="kpi"><div class="kpi-label">Highest Scoring Kw.</div><div class="kpi-value" id="kpi-top-kw-score" style="font-size:15px">{top_kw_by_score}</div><div class="kpi-sub" id="kpi-top-kw-score-sub">by avg IMDB score</div></div>
+    <div class="kpi" data-tip="Total number of distinct plot keywords used across all films in the selected range."><div class="kpi-label">Unique Keywords</div><div class="kpi-value" id="kpi-unique-kw">{total_kw:,}</div><div class="kpi-sub" id="kpi-unique-kw-sub">in selected range</div></div>
+    <div class="kpi" data-tip="How many films in the selected range have at least one plot keyword recorded in the dataset."><div class="kpi-label">Films with Keywords</div><div class="kpi-value" id="kpi-films-with-kw">{films_with_kw:,}</div><div class="kpi-sub" id="kpi-films-with-kw-sub">in selected range</div></div>
+    <div class="kpi accent" data-tip="The plot keyword that appears in the most films within the selected range."><div class="kpi-label">Most Used Keyword</div><div class="kpi-value" id="kpi-top-kw" style="font-size:15px">{kw_freq[0][0] if kw_freq else 'N/A'}</div><div class="kpi-sub" id="kpi-top-kw-sub">{kw_freq[0][1] if kw_freq else 0:,} films</div></div>
+    <div class="kpi" data-tip="Plot keyword associated with the highest average IMDb score, among keywords that appear in at least 10 films."><div class="kpi-label">Highest Scoring Kw.</div><div class="kpi-value" id="kpi-top-kw-score" style="font-size:15px">{top_kw_by_score}</div><div class="kpi-sub" id="kpi-top-kw-score-sub">by avg IMDB score</div></div>
   </div>
   <div class="charts-grid">
     <div class="chart-card"><div class="chart-title">Top 20 Keywords by Frequency</div><div class="chart-caption">Most common plot keywords across dataset</div><div class="chart-wrap hbar"><canvas id="cKwFreq"></canvas></div></div>
     <div class="chart-card"><div class="chart-title">Top 20 Keywords by Avg Score</div><div class="chart-caption">Keywords associated with highest-rated films (min 10 films)</div><div class="chart-wrap hbar"><canvas id="cKwScore"></canvas></div></div>
     <div class="chart-card wide"><div class="chart-title">Country Distribution</div><div class="chart-caption">Number of films per country of production</div><div class="chart-wrap hbar-sm"><canvas id="cCountries"></canvas></div></div>
+  </div>
+</div>
+
+<!-- ─────────────────────────── PAGE: ERA ANALYSIS ──────────────────────────── -->
+<div id="page-era" class="page">
+  <div class="kpi-row">
+    <div class="kpi" data-tip="Total count of films released within your selected year range."><div class="kpi-label">Films in Range</div><div class="kpi-value" id="kpi-era-count">—</div></div>
+    <div class="kpi" data-tip="Mean IMDb user rating across all films released in the selected range."><div class="kpi-label">Avg IMDb Score</div><div class="kpi-value" id="kpi-era-score">—</div></div>
+    <div class="kpi" data-tip="Percentage of films that have BOTH a budget AND a gross figure recorded. Not just one or neither — both are required. Post-1970 this typically sits around 50%."><div class="kpi-label">Financial Data Complete</div><div class="kpi-value" id="kpi-era-complete">—</div><div class="kpi-sub">films with both budget & gross</div></div>
+    <div class="kpi" data-tip="The 10-year decade with the most films released in the dataset within your selected range."><div class="kpi-label">Most Prolific Decade</div><div class="kpi-value" id="kpi-era-decade">—</div></div>
+  </div>
+  <p class="dataset-note">Dataset note: ~5,000 films scraped from IMDb, biased toward financially documented post-1970 productions. Pre-1960 years are significantly underrepresented and financial metrics for that era should be treated as incomplete.</p>
+  <div class="chart-card" style="margin:0 0 20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="chart-title">Films Summary</div>
+        <div class="chart-caption">Film count by year or decade · responds to year range filter</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="era-knob-group">
+          <button class="era-knob active" id="era-knob-year" data-mode="year">By Year</button>
+          <button class="era-knob" id="era-knob-decade" data-mode="decade">By Decade</button>
+        </div>
+        <span class="era-filter-notice" id="era-filter-notice">⚡ Responds to the year range filter above</span>
+      </div>
+    </div>
+    <div class="chart-wrap" style="height:220px"><canvas id="cEraSummary"></canvas></div>
+  </div>
+  <div class="charts-grid">
+    <div class="chart-card wide">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+        <div><div class="chart-title">Films Released per Year</div><div class="chart-caption">Bar = film count · Line = % with complete financial data (budget + gross)</div></div>
+        <div class="era-knob-group" id="knob-eraYear"><button class="era-knob active" data-mode="year">By Year</button><button class="era-knob" data-mode="decade">By Decade</button></div>
+      </div>
+      <div class="chart-wrap"><canvas id="cEraYear"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+        <div><div class="chart-title">Films per Decade / Year</div><div class="chart-caption">Film count by time period · color = avg IMDb score</div></div>
+        <div class="era-knob-group" id="knob-eraDecade"><button class="era-knob" data-mode="year">By Year</button><button class="era-knob active" data-mode="decade">By Decade</button></div>
+      </div>
+      <div class="chart-wrap hbar"><canvas id="cEraDecade"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+        <div><div class="chart-title">Genre Mix</div><div class="chart-caption">Share of films per genre · by decade (top 8 genres) or by year (top 5 genres)</div></div>
+        <div class="era-knob-group" id="knob-eraGenreMix"><button class="era-knob" data-mode="year">By Year</button><button class="era-knob active" data-mode="decade">By Decade</button></div>
+      </div>
+      <div class="chart-wrap"><canvas id="cEraGenreMix"></canvas></div>
+    </div>
+    <div class="chart-card wide">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+        <div><div class="chart-title">Financial Data Completeness</div><div class="chart-caption">% of films with budget data · gross data · both — by year or decade</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div></div>
+        <div class="era-knob-group" id="knob-eraComplete"><button class="era-knob active" data-mode="year">By Year</button><button class="era-knob" data-mode="decade">By Decade</button></div>
+      </div>
+      <div class="chart-wrap"><canvas id="cEraComplete"></canvas></div>
+    </div>
+  </div>
+  <div class="chart-card" style="margin:20px 0 24px">
+    <div class="chart-title">Top Film per Year</div>
+    <div class="chart-caption">Highest-rated film for each year in range · use filters to explore</div>
+    <div class="dir-controls" style="margin:8px 0 0">
+      <input class="dir-search" id="era-search" type="text" placeholder="Search title or director..." autocomplete="off"/>
+      <button class="date-reset-btn" id="eraDateReset" onclick="triggerDateReset()" title="Reset year range to full dataset">↺ Date Filter Reset</button>
+    </div>
+    <div class="film-filters" style="margin-top:6px">
+      <select class="film-filter-select" id="eraGenreFilter">
+        <option value="">All Genres</option>
+      </select>
+      <select class="film-filter-select" id="eraRatingFilter">
+        <option value="">All Ratings</option>
+        <option value="PG">PG</option>
+        <option value="PG-13">PG-13</option>
+        <option value="R">R</option>
+        <option value="G">G</option>
+        <option value="Not Rated">Not Rated</option>
+      </select>
+      <div class="film-sort-group">
+        <span class="film-sort-label">Sort by:</span>
+        <button class="era-sort-btn active" data-erasort="year">Year</button>
+        <button class="era-sort-btn" data-erasort="score">Score</button>
+        <button class="era-sort-btn" data-erasort="gross">Gross</button>
+        <button class="era-sort-btn" data-erasort="count">Film Count</button>
+        <button class="sort-dir-btn" id="eraSortDir" title="Toggle sort direction">&#8595;</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;padding:0 8px 12px;margin-top:8px">
+      <table id="era-table" style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="color:#8892a4;border-bottom:1px solid #2a2d3a">
+          <th style="padding:8px;text-align:left">Year</th>
+          <th style="padding:8px;text-align:left">Title</th>
+          <th style="padding:8px;text-align:left">Director</th>
+          <th style="padding:8px;text-align:left">Genre</th>
+          <th style="padding:8px;text-align:right">Score</th>
+          <th style="padding:8px;text-align:right">Gross (M)</th>
+          <th style="padding:8px;text-align:right">Films that Year</th>
+        </tr></thead>
+        <tbody id="era-table-body"></tbody>
+      </table>
+    </div>
+    <div id="era-table-footer" style="display:flex;align-items:center;justify-content:space-between;padding:6px 16px 8px;font-size:11px;color:#8892a4">
+      <span id="era-table-info"></span>
+      <div style="display:flex;gap:8px">
+        <button id="era-prev" style="background:#1a1d27;border:1px solid #2a2d3a;color:#8892a4;border-radius:5px;padding:3px 10px;cursor:pointer;font-size:11px">← Prev</button>
+        <button id="era-next" style="background:#1a1d27;border:1px solid #2a2d3a;color:#8892a4;border-radius:5px;padding:3px 10px;cursor:pointer;font-size:11px">Next →</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1388,6 +1805,7 @@ const initPage = {{
   directors: () => {{ initDirectorsPage(); }},
   engagement: initEngagement,
   keywords: initKeywords,
+  era: initEra,
 }};
 
 function showPage(name) {{
@@ -1433,10 +1851,61 @@ document.querySelectorAll(".nav-btn").forEach(btn => {{
     tipMin.style.opacity=(lo===hi)?"0":"1";
     applyBtn.disabled=(lo===activeMin && hi===activeMax);
     resetBtn.disabled=(lo===1916 && hi===2016);
+    // Resize grip when thumbs are too close
+    const grip = fill.querySelector('.range-fill-grip');
+    if (grip) {{
+      const trackEl = document.getElementById('rangeTrack');
+      const trackPx = trackEl ? trackEl.getBoundingClientRect().width : 0;
+      const fillPx = (rp - lp) / 100 * trackPx;
+      const GRIP_FULL = 52; // px below which grip starts shrinking
+      if (fillPx > 0 && fillPx < GRIP_FULL) {{
+        const s = Math.max(0, fillPx / GRIP_FULL);
+        grip.style.transform = `translate(-50%,-50%) scale(${{s.toFixed(3)}})`;
+        grip.style.opacity = (s < 0.15 ? 0 : s).toFixed(3);
+      }} else {{
+        grip.style.transform = 'translate(-50%,-50%) scale(1)';
+        grip.style.opacity = '1';
+      }}
+    }}
   }}
 
   yrMin.addEventListener("input", () => {{ if(parseInt(yrMin.value)>parseInt(yrMax.value)) yrMin.value=yrMax.value; updateTrack(); }});
   yrMax.addEventListener("input", () => {{ if(parseInt(yrMax.value)<parseInt(yrMin.value)) yrMax.value=yrMin.value; updateTrack(); }});
+
+  const rangeTrack=document.getElementById("rangeTrack");
+  const MIN_YR=1916, MAX_YR=2016;
+  let draggingWindow=false, dragStartX=0, dragStartLo=0, dragStartHi=0;
+
+  fill.addEventListener("mousedown", (e) => {{
+    e.stopPropagation();
+    e.preventDefault();
+    draggingWindow=true;
+    dragStartX=e.clientX;
+    dragStartLo=parseInt(yrMin.value);
+    dragStartHi=parseInt(yrMax.value);
+    fill.classList.add("dragging");
+    document.body.style.cursor="grabbing";
+  }});
+
+  document.addEventListener("mousemove", (e) => {{
+    if (!draggingWindow) return;
+    const trackW=rangeTrack.getBoundingClientRect().width;
+    const deltaPx=e.clientX-dragStartX;
+    const span=dragStartHi-dragStartLo;
+    const deltaYr=Math.round(deltaPx/trackW*TOTAL);
+    let newLo=dragStartLo+deltaYr, newHi=dragStartHi+deltaYr;
+    if (newLo<MIN_YR) {{ newLo=MIN_YR; newHi=MIN_YR+span; }}
+    if (newHi>MAX_YR) {{ newHi=MAX_YR; newLo=MAX_YR-span; }}
+    yrMin.value=newLo; yrMax.value=newHi;
+    updateTrack();
+  }});
+
+  document.addEventListener("mouseup", () => {{
+    if (!draggingWindow) return;
+    draggingWindow=false;
+    fill.classList.remove("dragging");
+    document.body.style.cursor="";
+  }});
 
   applyBtn.addEventListener("click", () => {{
     const lo=parseInt(yrMin.value), hi=parseInt(yrMax.value);
@@ -1451,11 +1920,30 @@ document.querySelectorAll(".nav-btn").forEach(btn => {{
   }});
 
   updateTrack();
+  requestAnimationFrame(() => updateTrack());
 }})();
+
+// ── Date Filter Reset helpers (for in-card reset buttons) ────────────────────
+function triggerDateReset() {{
+  document.getElementById('resetFilter').click();
+}}
+
+function syncDateResetBtns() {{
+  const isDefault = (activeMin === 1916 && activeMax === 2016);
+  const label = isDefault
+    ? '↺ Date Filter Reset'
+    : `↺ Date Filter Reset (${{activeMin}}–${{activeMax}})`;
+  document.querySelectorAll('.date-reset-btn').forEach(btn => {{
+    btn.disabled = isDefault;
+    btn.textContent = label;
+  }});
+}}
+
 
 function applyYearFilter(lo, hi) {{
   updateKPIs(lo, hi);
   activeMin=lo; activeMax=hi;
+  syncDateResetBtns();
   const s = getYearSlice(lo, hi);
   const gp = getGenreProf(lo, hi);
 
@@ -1536,9 +2024,23 @@ function applyYearFilter(lo, hi) {{
     C.countries.data.datasets[0].backgroundColor = cd.map((_,i)=>`rgba(89,161,79,${{(0.9-0.5*i/ctN).toFixed(2)}})` );
     C.countries.update();
   }}
+  if (INIT.era) {{
+    updateEraKPIs(lo, hi);
+    eraTblPage = 0;
+    renderEraTable(lo, hi);
+    const sd = buildEraSummaryData(lo, hi, eraSummaryMode);
+    C.eraSummary.data.labels = sd.labels;
+    C.eraSummary.data.datasets[0].data = sd.data;
+    C.eraSummary.update();
+    buildEraYearChart(lo, hi);
+    buildEraDecadeChart(lo, hi);
+    buildEraGenreMixChart(lo, hi);
+    buildEraCompleteChart(lo, hi);
+  }}
   filteredList = buildFilteredList(); currentPage=0; renderTable();
   actorFilteredList = buildActorFilteredList(); actorCurrentPage=0; renderActorTable();
   filmFilteredList = buildFilmFilteredList(); filmCurrentPage=0; renderFilmTable();
+  impactFilteredList = buildImpactFilteredList(); impactCurrentPage=0; renderImpactTable();
 }}
 
 // ── Visual helpers ────────────────────────────────────────────────────────────
@@ -1805,6 +2307,69 @@ function getContentRatings(lo, hi) {{
   }});
   return Object.entries(cmap).sort((a,b)=>b[1]-a[1]).slice(0,8);
 }}
+
+// per-year film counts for low-sample overlays
+const eraCountMap = {{}};
+(D.era_data || []).forEach(d => {{ eraCountMap[d.year] = d.count; }});
+
+// incomplete-year overlay:
+//   • amber diagonal stripes on 2016 (partial data) — all year-axis charts
+//   • shaded pre-1970 sparse/unreliable data band — cMovies, cROI, cGross, cEraComplete, cEraYear
+const incompleteYearPlugin = {{
+  id: 'incompleteYear',
+  afterDraw(chart) {{
+    const labels = chart.data.labels;
+    if (!labels || !labels.length) return;
+    const lastLabel = String(labels[labels.length - 1]);
+    const lastYear = parseInt(lastLabel);
+    if (isNaN(lastYear) || lastYear < 1900 || lastYear > 2020) return;
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+    const ctx = chart.ctx;
+    const ca = chart.chartArea;
+    const y0 = ca.top, y1 = ca.bottom;
+
+    // 2016 partial marker (amber stripes) — all year-axis charts
+    if (lastLabel === '2016') {{
+      const li = labels.length - 1;
+      const cx = xScale.getPixelForValue(li);
+      const bw = xScale.width / labels.length;
+      const rx0 = cx - bw / 2, rx1 = cx + bw / 2;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(rx0, y0, rx1 - rx0, y1 - y0); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,200,60,0.25)'; ctx.lineWidth = 3;
+      for (let s = -(y1 - y0); s < (rx1 - rx0); s += 8) {{
+        ctx.beginPath(); ctx.moveTo(rx0 + s, y0); ctx.lineTo(rx0 + s + (y1 - y0), y1); ctx.stroke();
+      }}
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,200,60,0.9)'; ctx.font = 'bold 9px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('⚠ partial', cx, y0 - 4);
+      ctx.restore();
+    }}
+
+    // Sparse-data era band — fixed pre-1970 boundary
+    const SPARSE_BAND_CHARTS = new Set(['cMovies', 'cROI', 'cGross', 'cEraComplete', 'cEraYear']);
+    if (!SPARSE_BAND_CHARTS.has(chart.canvas.id)) return;
+    const SPARSE_UNTIL = 1970;
+    const sparseIdx = labels.findIndex(l => parseInt(l) >= SPARSE_UNTIL);
+    const bandEndX = sparseIdx >= 0 ? xScale.getPixelForValue(sparseIdx) : null;
+    if (bandEndX === null || bandEndX <= ca.left) return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(140,150,170,0.07)';
+    ctx.fillRect(ca.left, y0, bandEndX - ca.left, y1 - y0);
+    ctx.strokeStyle = 'rgba(140,150,170,0.3)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(bandEndX, y0); ctx.lineTo(bandEndX, y1); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(140,150,170,0.65)'; ctx.font = '9px system-ui'; ctx.textAlign = 'left';
+    const bandLabel = (chart.canvas.id === 'cROI' || chart.canvas.id === 'cGross' || chart.canvas.id === 'cEraComplete')
+      ? '← unreliable financial data (pre-1970)'
+      : '← sparse film data (pre-1970)';
+    ctx.fillText(bandLabel, ca.left + 4, y0 + 12);
+    ctx.restore();
+  }}
+}};
+Chart.register(incompleteYearPlugin);
 
 // inline value-label plugin
 const valLabelPlugin = {{
@@ -2334,6 +2899,397 @@ function initKeywords() {{
   }}));
 }}
 
+// ── ERA ANALYSIS ──────────────────────────────────────────────────────────────
+
+function updateEraKPIs(lo, hi) {{
+  const rows = D.era_data.filter(d => d.year >= lo && d.year <= hi);
+  const totalFilms = rows.reduce((s,d) => s+d.count, 0);
+  const scores = rows.flatMap(d => d.avg_score != null ? [d.avg_score] : []);
+  const avgScore = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) : '—';
+  const bothRows = rows.filter(d => d.count > 0);
+  const completePct = bothRows.length ? Math.round(bothRows.reduce((s,d)=>s+d.has_both_pct*d.count,0)/totalFilms) : 0;
+  const decadeFilms = {{}};
+  rows.forEach(d => {{ const dec=(Math.floor(d.year/10)*10)+'s'; decadeFilms[dec]=(decadeFilms[dec]||0)+d.count; }});
+  const topDecade = Object.entries(decadeFilms).sort((a,b)=>b[1]-a[1])[0];
+  setKpi('kpi-era-count', totalFilms.toLocaleString());
+  setKpi('kpi-era-score', avgScore !== '—' ? '★ '+avgScore : '—');
+  setKpi('kpi-era-complete', completePct+'%');
+  setKpi('kpi-era-decade', topDecade ? topDecade[0] : '—');
+}}
+
+let eraTblPage = 0;
+let eraTblSort = 'year', eraTblAsc = true;
+let eraTblGenre = '', eraTblRating = '';
+
+function buildEraTableRows(lo, hi) {{
+  const q = (document.getElementById('era-search')?.value || '').toLowerCase().trim();
+  let rows = D.era_data.filter(d => d.year >= lo && d.year <= hi && d.top_film);
+  if (q) rows = rows.filter(d =>
+    d.top_film.title.toLowerCase().includes(q) ||
+    (d.top_film.director||'').toLowerCase().includes(q)
+  );
+  if (eraTblGenre)  rows = rows.filter(d => (d.top_film.genre||'') === eraTblGenre);
+  if (eraTblRating) rows = rows.filter(d => (d.top_film.rating||'') === eraTblRating);
+  rows = rows.slice().sort((a, b) => {{
+    let av, bv;
+    if (eraTblSort === 'year')  {{ av = a.year;           bv = b.year; }}
+    if (eraTblSort === 'score') {{ av = a.top_film.score; bv = b.top_film.score; }}
+    if (eraTblSort === 'gross') {{ av = a.top_film.gross ?? -Infinity; bv = b.top_film.gross ?? -Infinity; }}
+    if (eraTblSort === 'count') {{ av = a.count;          bv = b.count; }}
+    return eraTblAsc ? (av > bv ? 1 : av < bv ? -1 : 0) : (av < bv ? 1 : av > bv ? -1 : 0);
+  }});
+  return rows;
+}}
+
+function renderEraTable(lo, hi) {{
+  const rows = buildEraTableRows(lo, hi);
+  const PAGE = 15;
+  const total = rows.length;
+  if (eraTblPage * PAGE >= total && eraTblPage > 0) eraTblPage = Math.max(0, Math.ceil(total/PAGE)-1);
+  const paged = rows.slice(eraTblPage * PAGE, (eraTblPage+1) * PAGE);
+  const tbody = document.getElementById('era-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = paged.map(d => {{
+    const f = d.top_film;
+    const grossStr = f.gross != null ? '$'+f.gross+'M' : '<span style="color:#6b7a90">—</span>';
+    const dir = f.director ? `<span style="font-size:10px;color:#8892a4">${{f.director.length>22?f.director.slice(0,22)+'…':f.director}}</span>` : '<span style="color:#6b7a90">—</span>';
+    const genre = f.genre ? `<span class="genre-pill">${{f.genre}}</span>` : '';
+    return `<tr style="border-bottom:1px solid #1e2130">
+      <td style="padding:7px 8px;color:#8892a4">${{d.year}}</td>
+      <td style="padding:7px 8px;color:#e2e8f0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${{f.title}}">${{f.title}}</td>
+      <td style="padding:7px 8px">${{dir}}</td>
+      <td style="padding:7px 8px">${{genre}}</td>
+      <td style="padding:7px 8px;text-align:right;color:#59c3a4">★ ${{f.score}}</td>
+      <td style="padding:7px 8px;text-align:right;color:#8892a4">${{grossStr}}</td>
+      <td style="padding:7px 8px;text-align:right;color:#8892a4">${{d.count}}</td>
+    </tr>`;
+  }}).join('');
+  const info = document.getElementById('era-table-info');
+  const prev = document.getElementById('era-prev');
+  const next = document.getElementById('era-next');
+  if (info) {{
+    if (total === 0) {{
+      info.textContent = 'No results';
+    }} else {{
+      const start = eraTblPage * PAGE + 1;
+      const end = Math.min((eraTblPage + 1) * PAGE, total);
+      info.textContent = `Showing ${{start}}–${{end}} of ${{total}}`;
+    }}
+  }}
+  if (prev) prev.disabled = eraTblPage <= 0;
+  if (next) next.disabled = (eraTblPage + 1) * PAGE >= total;
+}}
+
+function populateEraGenreFilter() {{
+  const sel = document.getElementById('eraGenreFilter');
+  if (!sel || sel.options.length > 1) return;
+  const genres = [...new Set(D.era_data.filter(d=>d.top_film?.genre).map(d=>d.top_film.genre))].sort();
+  genres.forEach(g => {{ const o = document.createElement('option'); o.value=g; o.textContent=g; sel.appendChild(o); }});
+}}
+
+// Summary chart state
+let eraSummaryMode = 'year';
+let eraYearMode     = 'year';
+let eraDecadeChMode = 'decade';
+let eraGenreMixMode = 'decade';
+let eraCompleteMode = 'year';
+
+function avgArr(arr) {{ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }}
+
+function groupEraByDecade(lo, hi) {{
+  const rows = D.era_data.filter(d => d.year >= lo && d.year <= hi);
+  const dm = {{}};
+  rows.forEach(d => {{
+    const dec = Math.floor(d.year / 10) * 10;
+    if (!dm[dec]) dm[dec] = {{ count:0, scores:[], budget:[], gross:[], both:[] }};
+    dm[dec].count += d.count;
+    if (d.avg_score) dm[dec].scores.push(d.avg_score);
+    dm[dec].budget.push(d.has_budget_pct);
+    dm[dec].gross.push(d.has_gross_pct);
+    dm[dec].both.push(d.has_both_pct);
+  }});
+  const decades = Object.keys(dm).sort((a,b) => a-b);
+  return {{ dm, decades }};
+}}
+
+const ERA_GENRE_COLORS = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7'];
+
+function buildEraYearChart(lo, hi) {{
+  if (C.eraYear) {{ C.eraYear.destroy(); C.eraYear = null; }}
+  const isYear = eraYearMode === 'year';
+  let labels, ds0data, ds1data;
+  if (isYear) {{
+    const rows = D.era_data.filter(d => d.year >= lo && d.year <= hi);
+    labels  = rows.map(d => d.year);
+    ds0data = rows.map(d => d.count);
+    ds1data = rows.map(d => d.has_both_pct);
+  }} else {{
+    const {{ dm, decades }} = groupEraByDecade(lo, hi);
+    labels  = decades.map(d => d + 's');
+    ds0data = decades.map(d => dm[d].count);
+    ds1data = decades.map(d => avgArr(dm[d].both));
+  }}
+  C.eraYear = new Chart(document.getElementById('cEraYear'), {{
+    type: 'bar',
+    data: {{ labels, datasets: [
+      {{ label:'Films', data:ds0data, backgroundColor:'rgba(78,121,167,0.7)', borderRadius:2, yAxisID:'y', pointRadius: isYear ? 0 : 3 }},
+      {{ label:'% Complete Financial Data', data:ds1data, type:'line', borderColor:'#edc948', backgroundColor:'transparent', borderWidth:2, pointRadius: isYear ? 0 : 3, tension:0.3, yAxisID:'y2' }},
+    ]}},
+    options: merge(DEF, {{
+      plugins: {{ legend:{{ display:true, position:'top', labels:{{ color:'#8892a4', font:{{ size:11 }}, boxWidth:12 }} }} }},
+      scales: {{
+        y:  {{ title:{{ display:true, text:'Film count', color:'#8892a4', font:{{ size:10 }} }} }},
+        y2: {{ position:'right', min:0, max:100, title:{{ display:true, text:'% complete', color:'#edc948', font:{{ size:10 }} }}, ticks:{{ color:'#edc948', callback: v => v+'%' }}, grid:{{ drawOnChartArea:false }} }}
+      }}
+    }})
+  }});
+  bindExternalTooltip(C.eraYear, (dp) => ({{
+    title: String(dp.label),
+    value: dp.dataset.label + ': ' + dp.formattedValue,
+    films: getEraFilmsForLabel(dp.label, eraYearMode),
+    fmt: eraFmt,
+  }}));
+  CANVAS_TO_C['cEraYear'] = 'eraYear';
+}}
+
+function buildEraDecadeChart(lo, hi) {{
+  if (C.eraDecade) {{ C.eraDecade.destroy(); C.eraDecade = null; }}
+  if (eraDecadeChMode === 'decade') {{
+    const {{ dm, decades }} = groupEraByDecade(lo, hi);
+    const avgScores = decades.map(d => avgArr(dm[d].scores));
+    C.eraDecade = new Chart(document.getElementById('cEraDecade'), {{
+      type:'bar',
+      data:{{ labels:decades.map(d=>d+'s'), datasets:[{{ label:'Films', data:decades.map(d=>dm[d].count), backgroundColor:avgScores.map(s=>scoreColor(s,0.8)), borderRadius:3 }}] }},
+      options: merge(DEF, {{ indexAxis:'y', plugins:{{ legend:{{ display:false }} }}, scales:{{ x:{{ title:{{ display:true, text:'Film count', color:'#8892a4', font:{{ size:10 }} }} }} }} }})
+    }});
+  }} else {{
+    const rows = D.era_data.filter(d => d.year >= lo && d.year <= hi);
+    C.eraDecade = new Chart(document.getElementById('cEraDecade'), {{
+      type:'bar',
+      data:{{ labels:rows.map(d=>d.year), datasets:[{{ label:'Films', data:rows.map(d=>d.count), backgroundColor:rows.map(d=>scoreColor(d.avg_score||0,0.8)), borderRadius:2 }}] }},
+      options: merge(DEF, {{ plugins:{{ legend:{{ display:false }} }}, scales:{{ y:{{ title:{{ display:true, text:'Film count', color:'#8892a4', font:{{ size:10 }} }} }} }} }})
+    }});
+  }}
+  bindExternalTooltip(C.eraDecade, (dp) => ({{
+    title: String(dp.label),
+    value: `Films: ${{dp.formattedValue}}`,
+    films: getEraFilmsForLabel(dp.label, eraDecadeChMode),
+    fmt: eraFmt,
+  }}));
+  CANVAS_TO_C['cEraDecade'] = 'eraDecade';
+}}
+
+function buildEraGenreMixChart(lo, hi) {{
+  if (C.eraGenreMix) {{ C.eraGenreMix.destroy(); C.eraGenreMix = null; }}
+  if (eraGenreMixMode === 'decade') {{
+    const {{ decades: relArr }} = groupEraByDecade(lo, hi);
+    const relSet = new Set(relArr.map(Number));
+    const filtDec = D.decade_data.filter(d => relSet.has(d.decade));
+    const allG = [...new Set(filtDec.flatMap(d => Object.keys(d.genre_mix)))];
+    C.eraGenreMix = new Chart(document.getElementById('cEraGenreMix'), {{
+      type:'bar',
+      data:{{ labels:filtDec.map(d=>d.label), datasets:allG.map((g,i) => ({{ label:g, data:filtDec.map(d=>d.genre_mix[g]||0), backgroundColor:ERA_GENRE_COLORS[i%8], borderWidth:0 }})) }},
+      options: merge(DEF, {{ plugins:{{ legend:{{ display:true, position:'bottom', labels:{{ color:'#8892a4', font:{{ size:10 }}, boxWidth:10 }} }} }}, scales:{{ x:{{ stacked:true }}, y:{{ stacked:true, ticks:{{ callback:v=>v+'%' }}, title:{{ display:true, text:'% of decade films', color:'#8892a4', font:{{ size:10 }} }} }} }} }})
+    }});
+  }} else {{
+    const filtYears = D.years.filter(y => y >= lo && y <= hi);
+    const yrIdx = D.years.reduce((m,y,i) => {{ m[y]=i; return m; }}, {{}});
+    const gs = D.top5_genres;
+    const totals = filtYears.map(y => gs.reduce((s,g) => s+(D.genre_series[g]?.[yrIdx[y]]||0), 0));
+    C.eraGenreMix = new Chart(document.getElementById('cEraGenreMix'), {{
+      type:'bar',
+      data:{{ labels:filtYears, datasets:gs.map((g,i) => ({{ label:g, data:filtYears.map((y,j) => {{ const c=D.genre_series[g]?.[yrIdx[y]]||0; return totals[j] ? Math.round(c/totals[j]*1000)/10 : 0; }}), backgroundColor:ERA_GENRE_COLORS[i%8], borderWidth:0 }})) }},
+      options: merge(DEF, {{ plugins:{{ legend:{{ display:true, position:'bottom', labels:{{ color:'#8892a4', font:{{ size:10 }}, boxWidth:10 }} }} }}, scales:{{ x:{{ stacked:true }}, y:{{ stacked:true, ticks:{{ callback:v=>v+'%' }}, title:{{ display:true, text:'% per year', color:'#8892a4', font:{{ size:10 }} }} }} }} }})
+    }});
+  }}
+  bindExternalTooltip(C.eraGenreMix, (dp) => ({{
+    title: String(dp.label),
+    value: dp.dataset.label + ': ' + dp.formattedValue + '%',
+    films: getEraFilmsForLabel(dp.label, eraGenreMixMode),
+    fmt: eraFmt,
+  }}));
+  CANVAS_TO_C['cEraGenreMix'] = 'eraGenreMix';
+}}
+
+function buildEraCompleteChart(lo, hi) {{
+  if (C.eraComplete) {{ C.eraComplete.destroy(); C.eraComplete = null; }}
+  const dsMeta = [
+    {{ label:'% with Budget', borderColor:'#4e79a7', backgroundColor:'rgba(78,121,167,0.1)' }},
+    {{ label:'% with Gross',  borderColor:'#59a14f', backgroundColor:'rgba(89,161,79,0.1)' }},
+    {{ label:'% with Both',   borderColor:'#edc948', backgroundColor:'rgba(237,201,72,0.15)' }},
+  ];
+  const baseDs = (meta, data, pr) => ({{ ...meta, data, fill:true, tension:0.3, borderWidth:2, pointRadius:pr }});
+  if (eraCompleteMode === 'year') {{
+    const rows = D.era_data.filter(d => d.year >= lo && d.year <= hi);
+    C.eraComplete = new Chart(document.getElementById('cEraComplete'), {{
+      type:'line',
+      data:{{ labels:rows.map(d=>d.year), datasets:[
+        baseDs(dsMeta[0], rows.map(d=>d.has_budget_pct), 0),
+        baseDs(dsMeta[1], rows.map(d=>d.has_gross_pct),  0),
+        baseDs(dsMeta[2], rows.map(d=>d.has_both_pct),   0),
+      ]}},
+      options: merge(DEF, {{ plugins:{{ legend:{{ display:true, position:'top', labels:{{ color:'#8892a4', font:{{ size:11 }}, boxWidth:12 }} }} }}, scales:{{ y:{{ min:0, max:100, ticks:{{ callback:v=>v+'%' }}, title:{{ display:true, text:'% of films', color:'#8892a4', font:{{ size:10 }} }} }} }} }})
+    }});
+  }} else {{
+    const {{ dm, decades }} = groupEraByDecade(lo, hi);
+    C.eraComplete = new Chart(document.getElementById('cEraComplete'), {{
+      type:'line',
+      data:{{ labels:decades.map(d=>d+'s'), datasets:[
+        baseDs(dsMeta[0], decades.map(d=>avgArr(dm[d].budget)), 3),
+        baseDs(dsMeta[1], decades.map(d=>avgArr(dm[d].gross)),  3),
+        baseDs(dsMeta[2], decades.map(d=>avgArr(dm[d].both)),   3),
+      ]}},
+      options: merge(DEF, {{ plugins:{{ legend:{{ display:true, position:'top', labels:{{ color:'#8892a4', font:{{ size:11 }}, boxWidth:12 }} }} }}, scales:{{ y:{{ min:0, max:100, ticks:{{ callback:v=>v+'%' }}, title:{{ display:true, text:'% of films', color:'#8892a4', font:{{ size:10 }} }} }} }} }})
+    }});
+  }}
+  bindExternalTooltip(C.eraComplete, (dp) => ({{
+    title: String(dp.label),
+    value: dp.dataset.label + ': ' + dp.formattedValue + '%',
+    films: getEraFilmsForLabel(dp.label, eraCompleteMode),
+    fmt: eraFmt,
+  }}));
+  CANVAS_TO_C['cEraComplete'] = 'eraComplete';
+}}
+
+function buildEraSummaryData(lo, hi, mode) {{
+  if (mode === 'year') {{
+    const rows = D.era_data.filter(d => d.year >= lo && d.year <= hi);
+    return {{
+      labels: rows.map(d => d.year),
+      data: rows.map(d => d.count),
+    }};
+  }} else {{
+    const rows = D.era_data.filter(d => d.year >= lo && d.year <= hi);
+    const dm = {{}};
+    rows.forEach(d => {{
+      const dec = Math.floor(d.year / 10) * 10;
+      dm[dec] = (dm[dec] || 0) + d.count;
+    }});
+    const decades = Object.keys(dm).sort((a,b)=>a-b);
+    return {{
+      labels: decades.map(d => d + 's'),
+      data: decades.map(d => dm[d]),
+    }};
+  }}
+}}
+
+function wireEraKnobGroup(groupId, getModeVar, setModeVar, rebuild) {{
+  const group = document.getElementById(groupId);
+  if (!group) return;
+  group.querySelectorAll('.era-knob').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+      group.querySelectorAll('.era-knob').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      setModeVar(btn.dataset.mode);
+      rebuild(activeMin, activeMax);
+    }});
+  }});
+}}
+
+// Resolve top-5 films (by IMDb score) for a tooltip label in a given era mode.
+// Works for both 'year' labels (e.g. 1980) and 'decade' labels (e.g. "1980s").
+function getEraFilmsForLabel(label, mode) {{
+  if (mode === 'year') {{
+    const yr = parseInt(label);
+    return D.top_films_by_year?.[yr] || null;
+  }}
+  const decNum = parseInt(String(label).replace('s',''));
+  if (isNaN(decNum)) return null;
+  const pool = [];
+  for (let y = decNum; y < decNum + 10; y++) {{
+    (D.top_films_by_year?.[y] || []).forEach(f => pool.push(f));
+  }}
+  const best = pool.sort((a, b) => b.v - a.v).slice(0, 5);
+  return best.length ? best : null;
+}}
+
+const eraFmt = v => v ? ('★ ' + v.toFixed(1)) : '—';
+
+function initEra() {{
+  updateEraKPIs(activeMin, activeMax);
+  populateEraGenreFilter();
+  renderEraTable(activeMin, activeMax);
+
+  // ── Films Summary (top card) ─────────────────────────────────────────────
+  const summaryInit = buildEraSummaryData(activeMin, activeMax, 'year');
+  C.eraSummary = new Chart(document.getElementById('cEraSummary'), {{
+    type: 'bar',
+    data: {{ labels: summaryInit.labels, datasets: [{{ label:'Films', data:summaryInit.data, backgroundColor:'rgba(78,121,167,0.75)', borderRadius:3 }}] }},
+    options: merge(DEF, {{ plugins:{{ legend:{{ display:false }} }}, scales:{{ y:{{ title:{{ display:true, text:'Film count', color:'#8892a4', font:{{ size:10 }} }} }} }} }})
+  }});
+  bindExternalTooltip(C.eraSummary, (dp) => {{
+    const label = String(dp.label);
+    const films = getEraFilmsForLabel(label, eraSummaryMode);
+    return {{ title: label, value: 'Films: ' + dp.formattedValue, films, fmt: eraFmt }};
+  }});
+  wireEraKnobGroup('era-knob-group-summary',
+    () => eraSummaryMode,
+    m => {{ eraSummaryMode = m; }},
+    (lo, hi) => {{
+      const d = buildEraSummaryData(lo, hi, eraSummaryMode);
+      C.eraSummary.data.labels = d.labels;
+      C.eraSummary.data.datasets[0].data = d.data;
+      C.eraSummary.update();
+    }}
+  );
+  // The summary card uses inline IDs; wire by direct querySelectorAll scoped to its group
+  const summaryGroup = document.querySelector('#cEraSummary')?.closest('.chart-card')?.querySelector('.era-knob-group');
+  if (summaryGroup) {{
+    summaryGroup.querySelectorAll('.era-knob').forEach(btn => {{
+      btn.addEventListener('click', () => {{
+        summaryGroup.querySelectorAll('.era-knob').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        eraSummaryMode = btn.dataset.mode;
+        const d = buildEraSummaryData(activeMin, activeMax, eraSummaryMode);
+        C.eraSummary.data.labels = d.labels;
+        C.eraSummary.data.datasets[0].data = d.data;
+        C.eraSummary.update();
+      }});
+    }});
+  }}
+
+  // ── Grid charts — all use rebuild functions ───────────────────────────────
+  buildEraYearChart(activeMin, activeMax);
+  buildEraDecadeChart(activeMin, activeMax);
+  buildEraGenreMixChart(activeMin, activeMax);
+  buildEraCompleteChart(activeMin, activeMax);
+
+  wireEraKnobGroup('knob-eraYear',    () => eraYearMode,     m => {{ eraYearMode = m; }},     buildEraYearChart);
+  wireEraKnobGroup('knob-eraDecade',  () => eraDecadeChMode, m => {{ eraDecadeChMode = m; }},  buildEraDecadeChart);
+  wireEraKnobGroup('knob-eraGenreMix',() => eraGenreMixMode, m => {{ eraGenreMixMode = m; }},  buildEraGenreMixChart);
+  wireEraKnobGroup('knob-eraComplete',() => eraCompleteMode, m => {{ eraCompleteMode = m; }},  buildEraCompleteChart);
+
+  // ── Table controls ────────────────────────────────────────────────────────
+  document.getElementById('era-search')?.addEventListener('input', () => {{
+    eraTblPage = 0; renderEraTable(activeMin, activeMax);
+  }});
+  document.getElementById('eraGenreFilter')?.addEventListener('change', e => {{
+    eraTblGenre = e.target.value; eraTblPage = 0; renderEraTable(activeMin, activeMax);
+  }});
+  document.getElementById('eraRatingFilter')?.addEventListener('change', e => {{
+    eraTblRating = e.target.value; eraTblPage = 0; renderEraTable(activeMin, activeMax);
+  }});
+  document.querySelectorAll('.era-sort-btn').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+      document.querySelectorAll('.era-sort-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      eraTblSort = btn.dataset.erasort;
+      eraTblPage = 0; renderEraTable(activeMin, activeMax);
+    }});
+  }});
+  document.getElementById('eraSortDir')?.addEventListener('click', () => {{
+    eraTblAsc = !eraTblAsc;
+    document.getElementById('eraSortDir').textContent = eraTblAsc ? '\u2191' : '\u2193';
+    eraTblPage = 0; renderEraTable(activeMin, activeMax);
+  }});
+  document.getElementById('era-prev')?.addEventListener('click', () => {{
+    if (eraTblPage > 0) {{ eraTblPage--; renderEraTable(activeMin, activeMax); }}
+  }});
+  document.getElementById('era-next')?.addEventListener('click', () => {{
+    eraTblPage++; renderEraTable(activeMin, activeMax);
+  }});
+}}
+
 // ── DIRECTOR LEADERBOARD ─────────────────────────────────────────────────────
 
 const PAGE_SIZE = 25;
@@ -2426,6 +3382,7 @@ function showSubTab(name) {{
   if (name==="directors") {{ filteredList=buildFilteredList(); renderTable(); }}
   if (name==="cast") {{ actorFilteredList=buildActorFilteredList(); renderActorTable(); }}
   if (name==="films") {{ filmFilteredList=buildFilmFilteredList(); renderFilmTable(); }}
+  if (name==="impact") {{ impactFilteredList=buildImpactFilteredList(); renderImpactTable(); }}
 }}
 
 document.querySelectorAll(".sub-tab").forEach(btn => {{
@@ -2436,6 +3393,7 @@ function initDirectorsPage() {{
   filteredList = buildFilteredList(); renderTable();
   actorFilteredList = buildActorFilteredList();
   filmFilteredList = buildFilmFilteredList();
+  impactFilteredList = buildImpactFilteredList();
   populateFilmGenreFilter();
 }}
 
@@ -2625,6 +3583,126 @@ document.getElementById("filmSortDir").addEventListener("click", () => {{
 document.getElementById("filmPagePrev").addEventListener("click",()=>{{ if(filmCurrentPage>0){{filmCurrentPage--;refreshFilm();}} }});
 document.getElementById("filmPageNext").addEventListener("click",()=>{{ const t=Math.ceil(filmFilteredList.length/FILM_PAGE_SIZE); if(filmCurrentPage<t-1){{filmCurrentPage++;refreshFilm();}} }});
 
+// ── IMPACT LEADERBOARD ────────────────────────────────────────────────────────
+
+const IMPACT_PAGE_SIZE = 20;
+let impactSortKey = "impact", impactFilterText = "", impactCurrentPage = 0;
+let impactFilteredList = [];
+
+function buildImpactFilteredList() {{
+  const y0 = activeMin, y1 = activeMax;
+  let list = D.impact_top.filter(f => f.y >= y0 && f.y <= y1);
+  if (impactFilterText) {{
+    list = list.filter(f =>
+      f.t.toLowerCase().includes(impactFilterText) ||
+      f.d.toLowerCase().includes(impactFilterText)
+    );
+  }}
+  list = list.slice();
+  list.sort((a, b) => {{
+    if (impactSortKey === "impact") return b.i - a.i;
+    if (impactSortKey === "score")  return b.s - a.s;
+    if (impactSortKey === "votes")  return b.v - a.v;
+    if (impactSortKey === "year")   return b.y - a.y;
+    return 0;
+  }});
+  return list;
+}}
+
+function rankClass(rank) {{
+  if (rank === 1) return "gold";
+  if (rank === 2) return "silver";
+  if (rank === 3) return "bronze";
+  return "plain";
+}}
+
+function fmtVotes(v) {{
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return v.toString();
+}}
+
+function renderImpactTable() {{
+  const tbody = document.getElementById("impactTbody");
+  const pInfo = document.getElementById("impactPageInfo");
+  const pInd  = document.getElementById("impactPageIndicator");
+  const btnPrev = document.getElementById("impactPagePrev");
+  const btnNext = document.getElementById("impactPageNext");
+  tbody.innerHTML = "";
+
+  const totalPages = Math.max(1, Math.ceil(impactFilteredList.length / IMPACT_PAGE_SIZE));
+  if (impactCurrentPage >= totalPages) impactCurrentPage = totalPages - 1;
+  const start = impactCurrentPage * IMPACT_PAGE_SIZE;
+  const items = impactFilteredList.slice(start, start + IMPACT_PAGE_SIZE);
+
+  items.forEach((f, idx) => {{
+    const globalRank = start + idx + 1;
+    const rc = rankClass(globalRank);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="impact-rank ${{rc}}">${{globalRank}}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${{f.t}}">${{f.t}}</td>
+      <td class="num">${{f.y || "—"}}</td>
+      <td><span class="genre-pill">${{f.genre}}</span></td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#8892a4" title="${{f.d}}">${{f.d || "—"}}</td>
+      <td class="num">★ ${{f.s.toFixed(1)}}</td>
+      <td class="num" style="font-size:11px;color:#8892a4">${{fmtVotes(f.v)}}</td>
+      <td class="num impact-col">${{f.i.toFixed(2)}}</td>
+    `;
+    tbody.appendChild(tr);
+  }});
+
+  if (!items.length) {{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="8" style="text-align:center;color:#5a6a82;padding:24px">No films match your criteria.</td>`;
+    tbody.appendChild(tr);
+  }}
+
+  pInfo.textContent = `${{impactFilteredList.length.toLocaleString()}} films`;
+  pInd.textContent  = `${{impactCurrentPage + 1}} / ${{totalPages}}`;
+  btnPrev.disabled = impactCurrentPage === 0;
+  btnNext.disabled = impactCurrentPage >= totalPages - 1;
+}}
+
+function showImpactLoading(then) {{
+  const ov = document.getElementById("impactLoading");
+  ov.classList.add("visible");
+  requestAnimationFrame(() => requestAnimationFrame(() => {{ then(); ov.classList.remove("visible"); }}));
+}}
+
+function refreshImpact() {{
+  showImpactLoading(() => {{
+    impactFilteredList = buildImpactFilteredList();
+    renderImpactTable();
+  }});
+}}
+
+let impactSearchTimer;
+document.getElementById("impactSearch").addEventListener("input", e => {{
+  impactFilterText = e.target.value.toLowerCase().trim();
+  impactCurrentPage = 0;
+  clearTimeout(impactSearchTimer);
+  impactSearchTimer = setTimeout(refreshImpact, 80);
+}});
+
+document.querySelectorAll("[data-isort]").forEach(btn => {{
+  btn.addEventListener("click", () => {{
+    document.querySelectorAll("[data-isort]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    impactSortKey = btn.dataset.isort;
+    impactCurrentPage = 0;
+    refreshImpact();
+  }});
+}});
+
+document.getElementById("impactPagePrev").addEventListener("click", () => {{
+  if (impactCurrentPage > 0) {{ impactCurrentPage--; refreshImpact(); }}
+}});
+document.getElementById("impactPageNext").addEventListener("click", () => {{
+  const t = Math.ceil(impactFilteredList.length / IMPACT_PAGE_SIZE);
+  if (impactCurrentPage < t - 1) {{ impactCurrentPage++; refreshImpact(); }}
+}});
+
 // ── Chart info popups ────────────────────────────────────────────────────────
 
 const CHART_INFO = {{
@@ -2698,6 +3776,8 @@ const CANVAS_TO_C = {{
   cGenreROI: 'genreROI', cGenreScore: 'genreScore', cGenreTrends: 'genreTrends',
   cEngagement: 'engagement', cScoreDist: 'scoreDist', cRating: 'contentRating',
   cKwFreq: 'kwFreq', cKwScore: 'kwScore', cCountries: 'countries',
+  cEraYear: 'eraYear', cEraDecade: 'eraDecade', cEraGenreMix: 'eraGenreMix', cEraComplete: 'eraComplete',
+  cEraSummary: 'eraSummary',
 }};
 let zoomChart = null;
 
@@ -2842,6 +3922,29 @@ populateFilmGenreFilter();
 filteredList = buildFilteredList(); renderTable();
 actorFilteredList = buildActorFilteredList();
 filmFilteredList = buildFilmFilteredList();
+impactFilteredList = buildImpactFilteredList();
+syncDateResetBtns();
+
+// Inject card ID labels as headers on every chart card
+const PAGE_NAME_MAP = {{
+  'page-overview':    'overview',
+  'page-financial':   'financial',
+  'page-genre':       'genre',
+  'page-directors':   'leaders',
+  'page-engagement':  'engagement',
+  'page-keywords':    'keywords',
+  'page-era':         'era',
+}};
+document.querySelectorAll('.page').forEach(page => {{
+  const pageName = PAGE_NAME_MAP[page.id] || page.id.replace('page-', '');
+  let order = 1;
+  page.querySelectorAll('.chart-card').forEach(card => {{
+    const lbl = document.createElement('div');
+    lbl.className = 'card-id-label';
+    lbl.textContent = pageName + '-' + order++;
+    card.insertBefore(lbl, card.firstChild);
+  }});
+}});
 
 </script>
 </body>
