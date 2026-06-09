@@ -640,6 +640,347 @@ for r in rows:
         _tfby[yr].append({"t": _trunc(title), "v": sc, "g": g})
 top_films_by_year = {yr: sorted(fs, key=lambda x: -(x["v"] or 0))[:5] for yr, fs in _tfby.items()}
 
+# ── Keywords & Reach extended data ──────────────────────────────────────────────
+
+safe_float = to_float
+
+def safe_year(row):
+    return to_int(row.get("title_year", ""))
+
+# Chart 1: Top Plot Keywords frequency
+kw_freq_all = Counter()
+kw_film_index = defaultdict(list)
+for row in rows:
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    gross = safe_float(row.get("gross"))
+    kws = [k.strip() for k in row.get("plot_keywords", "").split("|") if len(k.strip()) > 2]
+    for kw in kws:
+        kw_freq_all[kw] += 1
+        kw_film_index[kw].append({"t": title, "s": score, "y": yr, "g": gross})
+
+top_kw_freq = [
+    {"kw": k, "count": v, "films": sorted(kw_film_index[k], key=lambda x: -(x["s"] or 0))[:10]}
+    for k, v in kw_freq_all.most_common(25)
+]
+
+# Chart 2: Genre hierarchy (treemap data)
+genre_freq = Counter()
+genre_combo_freq = Counter()
+genre_film_index = defaultdict(list)
+for row in rows:
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    gross = safe_float(row.get("gross"))
+    gs = [g.strip() for g in row.get("genres", "").split("|") if g.strip()]
+    for g in gs:
+        genre_freq[g] += 1
+        genre_film_index[g].append({"t": title, "s": score, "y": yr, "g": gross})
+    if gs:
+        genre_combo_freq["|".join(sorted(gs[:3]))] += 1
+
+genre_treemap = [
+    {"genre": g, "count": c, "films": sorted(genre_film_index[g], key=lambda x: -(x["s"] or 0))[:10]}
+    for g, c in genre_freq.most_common(20)
+]
+genre_combo_top = [{"combo": k, "count": v} for k, v in genre_combo_freq.most_common(15)]
+
+# Chart 3: Keyword word cloud (freq + avg score)
+kw_score_map = defaultdict(list)
+for row in rows:
+    score = safe_float(row.get("imdb_score"))
+    if score is None:
+        continue
+    for kw in [k.strip() for k in row.get("plot_keywords", "").split("|") if len(k.strip()) > 2]:
+        kw_score_map[kw].append(score)
+kw_cloud_data = []
+for kw, cnt in kw_freq_all.most_common(60):
+    avg_sc = round(sum(kw_score_map[kw]) / len(kw_score_map[kw]), 2) if kw_score_map[kw] else None
+    kw_cloud_data.append({"text": kw, "freq": cnt, "score": avg_sc})
+
+# Chart 4: Keyword Social Reach (box plot data: fb likes per keyword)
+kw_fb_data = defaultdict(list)
+top10_kws = [k for k, _ in kw_freq_all.most_common(10)]
+for row in rows:
+    fb = safe_float(row.get("movie_facebook_likes"))
+    if fb is None or fb <= 0:
+        continue
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    for kw in [k.strip() for k in row.get("plot_keywords", "").split("|") if k.strip() in top10_kws]:
+        kw_fb_data[kw].append({"fb": fb, "t": title, "y": yr, "s": score})
+
+def box_stats(vals):
+    if not vals:
+        return None
+    s = sorted(vals)
+    n = len(s)
+    q1 = s[n // 4]
+    median = s[n // 2]
+    q3 = s[3 * n // 4]
+    iqr = q3 - q1
+    lo = q1 - 1.5 * iqr
+    hi = q3 + 1.5 * iqr
+    whislo = min(v for v in s if v >= lo)
+    whishi = max(v for v in s if v <= hi)
+    outliers = [v for v in s if v < lo or v > hi]
+    return {
+        "q1": q1, "median": median, "q3": q3,
+        "whislo": whislo, "whishi": whishi,
+        "mean": round(sum(s) / n), "outliers": outliers[:5],
+    }
+
+kw_social_box = []
+for kw in top10_kws:
+    items = kw_fb_data[kw]
+    vals = [d["fb"] for d in items]
+    stats = box_stats(vals)
+    if stats:
+        films = sorted(items, key=lambda x: -x["fb"])[:10]
+        kw_social_box.append({"kw": kw, "stats": stats, "films": films})
+
+# Chart 5: Genre Audience Engagement bubble data
+genre_engagement = defaultdict(list)
+for row in rows:
+    votes = safe_float(row.get("num_voted_users"))
+    score = safe_float(row.get("imdb_score"))
+    reviews = safe_float(row.get("num_user_for_reviews"))
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    gross = safe_float(row.get("gross"))
+    if votes is None or score is None:
+        continue
+    gs = [g.strip() for g in row.get("genres", "").split("|") if g.strip()]
+    primary = gs[0] if gs else "Unknown"
+    genre_engagement[primary].append({
+        "votes": votes, "score": score, "reviews": reviews or 0,
+        "t": title, "y": yr, "g": gross,
+    })
+
+top8_genres = [g for g, _ in Counter({g: len(v) for g, v in genre_engagement.items()}).most_common(8)]
+bubble_data = []
+for g in top8_genres:
+    for d in genre_engagement[g][:80]:
+        bubble_data.append({
+            "genre": g, "x": d["votes"], "y": d["score"], "r": d["reviews"],
+            "t": d["t"], "yr": d.get("y"),
+        })
+
+# Chart 6: Cast Star-Power by Keyword heatmap
+kw_cast_data = defaultdict(list)
+top12_kws = [k for k, _ in kw_freq_all.most_common(12)]
+for row in rows:
+    cast_fb = safe_float(row.get("cast_total_facebook_likes"))
+    if cast_fb is None or cast_fb <= 0:
+        continue
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    score = safe_float(row.get("imdb_score"))
+    yr = safe_year(row)
+    for kw in [k.strip() for k in row.get("plot_keywords", "").split("|") if k.strip() in top12_kws]:
+        kw_cast_data[kw].append({"cast_fb": cast_fb, "t": title, "s": score, "y": yr})
+
+kw_cast_avg = []
+for kw in top12_kws:
+    items = kw_cast_data[kw]
+    if not items:
+        continue
+    avg_fb = round(sum(d["cast_fb"] for d in items) / len(items))
+    films = sorted(items, key=lambda x: -x["cast_fb"])[:10]
+    kw_cast_avg.append({"kw": kw, "avg_cast_fb": avg_fb, "count": len(items), "films": films})
+kw_cast_avg.sort(key=lambda x: -x["avg_cast_fb"])
+
+# Chart 7: Box Office scatter (budget vs gross)
+boxoffice_pts = []
+for row in rows:
+    b = safe_float(row.get("budget"))
+    g = safe_float(row.get("gross"))
+    if b is None or g is None or b <= 0 or g <= 0:
+        continue
+    if b > 5e8 or g > 3e9:
+        continue
+    ratio = g / b
+    if ratio < 0.005:
+        continue
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    gs = [gg.strip() for gg in row.get("genres", "").split("|") if gg.strip()]
+    primary_genre = gs[0] if gs else "Other"
+    votes = safe_float(row.get("num_voted_users"))
+    boxoffice_pts.append({
+        "x": round(b / 1e6, 1), "y": round(g / 1e6, 1),
+        "t": title, "yr": yr, "s": score, "genre": primary_genre,
+        "v": int(votes) if votes else None,
+    })
+
+# Chart 8: Genre Profit Margins (ROI distribution)
+genre_roi = defaultdict(list)
+for row in rows:
+    b = safe_float(row.get("budget"))
+    g = safe_float(row.get("gross"))
+    if b is None or g is None or b <= 0:
+        continue
+    ratio = g / b
+    if ratio < 0.005 or b > 5e8:
+        continue
+    roi = round((g - b) / b * 100, 1)
+    if abs(roi) > 2000:
+        continue
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    gs = [gg.strip() for gg in row.get("genres", "").split("|") if gg.strip()]
+    primary = gs[0] if gs else "Other"
+    genre_roi[primary].append({"roi": roi, "t": title, "y": yr, "s": score, "g": g, "b": b})
+
+top_genre_roi = [g for g, _ in Counter({g: len(v) for g, v in genre_roi.items()}).most_common(8)]
+genre_roi_data = []
+for g in top_genre_roi:
+    items = genre_roi[g]
+    rois = sorted(d["roi"] for d in items)
+    n = len(rois)
+    if n < 5:
+        continue
+    q1 = rois[n // 4]
+    med = rois[n // 2]
+    q3 = rois[3 * n // 4]
+    avg = round(sum(rois) / n, 1)
+    films = sorted(items, key=lambda x: -x["roi"])[:10]
+    genre_roi_data.append({
+        "genre": g, "q1": q1, "median": med, "q3": q3,
+        "avg": avg, "count": n, "films": films,
+    })
+
+# Chart 9: Keyword Co-occurrence network
+cooc_pairs = Counter()
+cooc_film_map = defaultdict(list)
+for row in rows:
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    kws = [k.strip() for k in row.get("plot_keywords", "").split("|") if len(k.strip()) > 2]
+    for i in range(len(kws)):
+        for j in range(i + 1, len(kws)):
+            pair = tuple(sorted([kws[i], kws[j]]))
+            cooc_pairs[pair] += 1
+            cooc_film_map[pair].append({"t": title, "y": yr, "s": score})
+
+cooc_top = []
+for pair, cnt in cooc_pairs.most_common(30):
+    films = sorted(cooc_film_map[pair], key=lambda x: -(x["s"] or 0))[:10]
+    cooc_top.append({"a": pair[0], "b": pair[1], "count": cnt, "films": films})
+
+# Chart 10: Poster Faces vs Social Reach
+faces_social = []
+for row in rows:
+    faces = safe_float(row.get("facenumber_in_poster"))
+    fb = safe_float(row.get("movie_facebook_likes"))
+    if faces is None or fb is None:
+        continue
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    faces_social.append({"x": int(faces), "y": fb, "t": title, "yr": yr, "s": score})
+
+faces_agg = defaultdict(list)
+for d in faces_social:
+    if d["x"] <= 10:
+        faces_agg[d["x"]].append(d)
+faces_chart = [
+    {
+        "faces": k,
+        "avg_fb": round(sum(d["y"] for d in v) / len(v)),
+        "count": len(v),
+        "films": sorted(v, key=lambda x: -x["y"])[:10],
+    }
+    for k, v in sorted(faces_agg.items())
+]
+
+# Chart 11: Director Brand Multiplier
+dir_brand = []
+dir_film_map = defaultdict(list)
+for row in rows:
+    dir_fb = safe_float(row.get("director_facebook_likes"))
+    movie_fb = safe_float(row.get("movie_facebook_likes"))
+    director = row.get("director_name", "").strip()
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    score = safe_float(row.get("imdb_score"))
+    if dir_fb is None or movie_fb is None or dir_fb <= 0 or not director:
+        continue
+    dir_film_map[director].append({
+        "dir_fb": dir_fb, "movie_fb": movie_fb,
+        "t": title, "y": yr, "s": score,
+    })
+
+for director, films in dir_film_map.items():
+    if len(films) < 2:
+        continue
+    avg_dir = round(sum(d["dir_fb"] for d in films) / len(films))
+    avg_movie = round(sum(d["movie_fb"] for d in films) / len(films))
+    multiplier = round(avg_movie / avg_dir, 2) if avg_dir else 0
+    dir_brand.append({
+        "director": director, "dir_fb": avg_dir, "movie_fb": avg_movie,
+        "multiplier": multiplier,
+        "films": sorted(films, key=lambda x: -x["movie_fb"])[:10],
+    })
+
+dir_brand.sort(key=lambda x: -x["movie_fb"])
+dir_brand = dir_brand[:20]
+
+# Chart 12: Financial Trends Over Time
+fin_trend = defaultdict(lambda: {"budgets": [], "grosses": [], "rois": [], "films": []})
+for row in rows:
+    yr = safe_year(row)
+    if yr is None:
+        continue
+    b = safe_float(row.get("budget"))
+    g = safe_float(row.get("gross"))
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    score = safe_float(row.get("imdb_score"))
+    if b and g and b > 0 and g / b >= 0.005 and b <= 5e8:
+        fin_trend[yr]["budgets"].append(b / 1e6)
+        fin_trend[yr]["grosses"].append(g / 1e6)
+        fin_trend[yr]["rois"].append((g - b) / b * 100)
+        fin_trend[yr]["films"].append({
+            "t": title, "s": score,
+            "b": round(b / 1e6, 1), "g": round(g / 1e6, 1),
+        })
+
+fin_trend_data = []
+for yr in sorted(fin_trend.keys()):
+    d = fin_trend[yr]
+    if len(d["budgets"]) < 2:
+        continue
+    fin_trend_data.append({
+        "year": yr,
+        "avg_budget": round(sum(d["budgets"]) / len(d["budgets"]), 1),
+        "avg_gross": round(sum(d["grosses"]) / len(d["grosses"]), 1),
+        "avg_roi": round(sum(d["rois"]) / len(d["rois"]), 1),
+        "films": sorted(d["films"], key=lambda x: -(x["g"] or 0))[:10],
+    })
+
+# Chart 13: Duration vs Score
+duration_score = []
+for row in rows:
+    dur = safe_float(row.get("duration"))
+    score = safe_float(row.get("imdb_score"))
+    rating = row.get("content_rating", "").strip() or "NR"
+    title = row.get("movie_title", "").strip().rstrip("\xa0")
+    yr = safe_year(row)
+    gross = safe_float(row.get("gross"))
+    if dur is None or score is None or dur < 40 or dur > 300:
+        continue
+    votes = safe_float(row.get("num_voted_users"))
+    duration_score.append({
+        "x": int(dur), "y": score, "rating": rating,
+        "t": title, "yr": yr, "g": gross,
+        "v": int(votes) if votes else None,
+    })
+
 # ── Pack data ─────────────────────────────────────────────────────────────────
 
 data = {
@@ -719,6 +1060,21 @@ data = {
     "top_gross_by_year": top_gross_by_year,
     "top_films_by_year": top_films_by_year,
     "impact_top": impact_top,
+    "top_kw_freq": top_kw_freq,
+    "kw_film_index": {k: sorted(v, key=lambda x: -(x["s"] or 0))[:10] for k, v in kw_film_index.items()},
+    "genre_treemap": genre_treemap,
+    "genre_combo_top": genre_combo_top,
+    "kw_cloud_data": kw_cloud_data,
+    "kw_social_box": kw_social_box,
+    "bubble_data": bubble_data,
+    "kw_cast_avg": kw_cast_avg,
+    "boxoffice_pts": boxoffice_pts,
+    "genre_roi_data": genre_roi_data,
+    "cooc_top": cooc_top,
+    "faces_chart": faces_chart,
+    "dir_brand": dir_brand,
+    "fin_trend_data": fin_trend_data,
+    "duration_score": duration_score,
 }
 
 # ── Palette ───────────────────────────────────────────────────────────────────
@@ -991,7 +1347,7 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
 }}
 .chart-title   {{ font-size: 13px; font-weight: 600; margin-bottom: 3px; }}
 .chart-caption {{ font-size: 11px; color: var(--muted); margin-bottom: 12px; }}
-.chart-wrap                 {{ position: relative; height: 240px; }}
+.chart-wrap                 {{ position: relative; height: 240px; overflow: hidden; }}
 .chart-wrap.tall            {{ height: 300px; }}
 .chart-wrap.scatter-h       {{ height: 400px; }}
 .chart-wrap.hbar            {{ height: 380px; }}
@@ -1100,7 +1456,7 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
 
 /* ── Chart zoom modal ── */
 #zoom-modal {{
-  position: fixed; inset: 0; z-index: 10000;
+  position: fixed; inset: 0; z-index: 10002;
   background: rgba(0,0,0,.75);
   display: none; align-items: center; justify-content: center;
   padding: 20px;
@@ -1606,9 +1962,19 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
     <div class="kpi" data-tip="Plot keyword associated with the highest average IMDb score, among keywords that appear in at least 10 films."><div class="kpi-label">Highest Scoring Kw.</div><div class="kpi-value" id="kpi-top-kw-score" style="font-size:15px">{top_kw_by_score}</div><div class="kpi-sub" id="kpi-top-kw-score-sub">by avg IMDB score</div></div>
   </div>
   <div class="charts-grid">
-    <div class="chart-card"><div class="chart-title">Top 20 Keywords by Frequency</div><div class="chart-caption">Most common plot keywords across dataset</div><div class="chart-wrap hbar"><canvas id="cKwFreq"></canvas></div></div>
-    <div class="chart-card"><div class="chart-title">Top 20 Keywords by Avg Score</div><div class="chart-caption">Keywords associated with highest-rated films (min 10 films)</div><div class="chart-wrap hbar"><canvas id="cKwScore"></canvas></div></div>
-    <div class="chart-card wide"><div class="chart-title">Country Distribution</div><div class="chart-caption">Number of films per country of production</div><div class="chart-wrap hbar-sm"><canvas id="cCountries"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Top Plot Keywords</div><div class="chart-caption">Most frequently occurring plot keywords across all films</div><div class="chart-wrap hbar"><canvas id="cKw1"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Genre Hierarchy</div><div class="chart-caption">Genre popularity and combination patterns across the dataset</div><div class="chart-wrap hbar"><canvas id="cKw2"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Keyword Social Reach</div><div class="chart-caption">Distribution of social reach for films sharing the same keywords</div><div class="chart-wrap tall"><canvas id="cKw4" style="width:100%;height:100%;display:block"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Cast Star-Power by Keyword</div><div class="chart-caption">Which keyword themes attract high-profile cast lineups</div><div class="chart-wrap hbar"><canvas id="cKw6"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Keyword Word Cloud</div><div class="chart-caption">Plot keywords sized by frequency, colored by avg IMDb score</div><div class="chart-wrap tall"><div id="cKw3" style="width:100%;height:100%"></div></div></div>
+    <div class="chart-card"><div class="chart-title">Keyword Co-Occurrence Network</div><div class="chart-caption">Keywords that frequently appear together in the same film</div><div class="chart-wrap tall"><canvas id="cKw9" style="width:100%;height:100%;display:block"></canvas></div></div>
+    <div class="chart-card wide"><div class="chart-title">Genre Audience Engagement</div><div class="chart-caption">Each bubble = one film · X = votes (log) · Y = IMDb score · Size = user reviews · Color = genre</div><div class="chart-wrap scatter-h"><canvas id="cKw5"></canvas></div></div>
+    <div class="chart-card wide"><div class="chart-title">Box Office Scatter</div><div class="chart-caption">Budget vs. gross with break-even line, colored by genre</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap scatter-h"><canvas id="cKw7"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Genre Profit Margins</div><div class="chart-caption">ROI distribution by genre — risk vs. reward</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap hbar"><canvas id="cKw8"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Poster Faces vs Social Reach</div><div class="chart-caption">Poster face count vs. movie Facebook likes</div><div class="chart-wrap hbar"><canvas id="cKw10"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Director Brand Multiplier</div><div class="chart-caption">Director personal brand vs. film social reach</div><div class="chart-wrap hbar-sm"><canvas id="cKw11"></canvas></div></div>
+    <div class="chart-card"><div class="chart-title">Duration vs Score</div><div class="chart-caption">Each dot = one film · X = runtime · Y = IMDb score · Color = content rating</div><div class="chart-wrap scatter-h"><canvas id="cKw13"></canvas></div></div>
+    <div class="chart-card wide"><div class="chart-title">Financial Trends Over Time</div><div class="chart-caption">Average budget, gross, and ROI trends year-over-year</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap tall"><canvas id="cKw12"></canvas></div></div>
   </div>
 </div>
 
@@ -1725,7 +2091,7 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
   <div class="zoom-modal-card">
     <div class="zoom-modal-header">
       <span class="zoom-modal-title" id="zoom-modal-title"></span>
-      <button class="zoom-modal-close" id="zoom-modal-close" title="Close">&#10005;</button>
+      <button class="zoom-modal-close" id="zoom-modal-close" title="Close" aria-label="Close">&#10005;</button>
     </div>
     <div class="zoom-modal-body">
       <canvas id="zoom-canvas"></canvas>
@@ -2006,24 +2372,7 @@ function applyYearFilter(lo, hi) {{
     C.contentRating.data.datasets[0].data = cr.map(d=>d[1]);
     C.contentRating.update();
   }}
-  if (INIT.keywords) {{
-    const kd = getKwData(lo, hi);
-    const kwN = Math.max(kd.freq.length, 1);
-    C.kwFreq.data.labels = kd.freq.map(d=>d[0]);
-    C.kwFreq.data.datasets[0].data = kd.freq.map(d=>d[1]);
-    C.kwFreq.data.datasets[0].backgroundColor = kd.freq.map((_,i)=>`rgba(78,121,167,${{(0.9-0.5*i/kwN).toFixed(2)}})` );
-    C.kwFreq.update();
-    C.kwScore.data.labels = kd.score.map(d=>d[0]);
-    C.kwScore.data.datasets[0].data = kd.score.map(d=>d[1]);
-    C.kwScore.data.datasets[0].backgroundColor = kd.score.map(d=>scoreColor(d[1], 0.85));
-    C.kwScore.update();
-    const cd = getCountryData(lo, hi);
-    const ctN = Math.max(cd.length, 1);
-    C.countries.data.labels = cd.map(d=>d[0]);
-    C.countries.data.datasets[0].data = cd.map(d=>d[1]);
-    C.countries.data.datasets[0].backgroundColor = cd.map((_,i)=>`rgba(89,161,79,${{(0.9-0.5*i/ctN).toFixed(2)}})` );
-    C.countries.update();
-  }}
+  /* keyword charts use static D.* aggregates; KPIs updated in updateKPIs */
   if (INIT.era) {{
     updateEraKPIs(lo, hi);
     eraTblPage = 0;
@@ -2188,20 +2537,36 @@ function truncTipTitle(t, n=32) {{
   return t.length > n ? t.slice(0, n) + '…' : t;
 }}
 
+function kwFilmList(films, fmt) {{
+  if (!films || !films.length) return '';
+  const show = films.slice(0, 5);
+  const more = films.length > 5 ? `<div style="color:#6b7a90;font-style:italic;margin-top:2px">…and ${{films.length-5}} more</div>` : '';
+  return '<div style="margin-top:6px">' + show.map(f => {{
+    const score = f.s ? `★${{f.s}}` : '—';
+    const year = f.y || f.yr || '—';
+    const extra = fmt ? fmt(f) : '';
+    return `<div style="padding:2px 0;border-bottom:1px solid #1e2130"><span style="color:#e2e8f0">${{f.t||'Unknown'}}</span> <span style="color:#8892a4;font-size:10px">${{year}} · ${{score}}${{extra}}</span></div>`;
+  }}).join('') + more + '</div>';
+}}
+
 function buildTooltipHTML(title, value, films, fmt) {{
   let html = `<div style="color:#f28e2b;font-weight:700;font-size:12px;margin-bottom:4px">${{title}}</div>`;
   if (value) html += `<div style="color:#fff;font-weight:700;font-size:14px">${{value}}</div>`;
-  if (films && films.length && fmt) {{
+  if (films && films.length) {{
     html += `<div style="border-top:1px solid #2a2d3a;margin:8px 0"></div>`;
     html += `<div style="color:#8892a4;font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Top films</div>`;
-    films.slice(0, 4).forEach(f => {{
-      const badge = fmt(f.v);
-      const accent = tooltipAccent(badge);
-      html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">`;
-      html += `<span style="color:#fff;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">${{truncTipTitle(f.t)}}</span>`;
-      html += `<span style="background:#2a2d3a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;color:${{accent}};flex-shrink:0">${{badge}}</span>`;
-      html += `</div>`;
-    }});
+    if (films[0].v !== undefined && fmt) {{
+      films.slice(0, 5).forEach(f => {{
+        const badge = fmt(f.v);
+        const accent = tooltipAccent(badge);
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">`;
+        html += `<span style="color:#fff;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">${{truncTipTitle(f.t)}}</span>`;
+        html += `<span style="background:#2a2d3a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;color:${{accent}};flex-shrink:0">${{badge}}</span>`;
+        html += `</div>`;
+      }});
+    }} else {{
+      html += kwFilmList(films, fmt);
+    }}
   }}
   return html;
 }}
@@ -2349,7 +2714,7 @@ const incompleteYearPlugin = {{
     }}
 
     // Sparse-data era band — fixed pre-1970 boundary
-    const SPARSE_BAND_CHARTS = new Set(['cMovies', 'cROI', 'cGross', 'cEraComplete', 'cEraYear']);
+    const SPARSE_BAND_CHARTS = new Set(['cMovies', 'cROI', 'cGross', 'cEraComplete', 'cEraYear', 'cKw12']);
     if (!SPARSE_BAND_CHARTS.has(chart.canvas.id)) return;
     const SPARSE_UNTIL = 1970;
     const sparseIdx = labels.findIndex(l => parseInt(l) >= SPARSE_UNTIL);
@@ -2362,7 +2727,7 @@ const incompleteYearPlugin = {{
     ctx.beginPath(); ctx.moveTo(bandEndX, y0); ctx.lineTo(bandEndX, y1); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(140,150,170,0.65)'; ctx.font = '9px system-ui'; ctx.textAlign = 'left';
-    const bandLabel = (chart.canvas.id === 'cROI' || chart.canvas.id === 'cGross' || chart.canvas.id === 'cEraComplete')
+    const bandLabel = (chart.canvas.id === 'cROI' || chart.canvas.id === 'cGross' || chart.canvas.id === 'cEraComplete' || chart.canvas.id === 'cKw12')
       ? '← unreliable financial data (pre-1970)'
       : '← sparse film data (pre-1970)';
     ctx.fillText(bandLabel, ca.left + 4, y0 + 12);
@@ -2823,80 +3188,682 @@ function getCountryData(lo, hi) {{
 // ── KEYWORDS ─────────────────────────────────────────────────────────────────
 
 function initKeywords() {{
-  const kd  = getKwData(activeMin, activeMax);
-  const ctd = getCountryData(activeMin, activeMax);
-
-  // Keyword frequency — fading blue bars by rank
-  C.kwFreq = new Chart(document.getElementById("cKwFreq"), {{
-    type:"bar",
-    data:{{ labels:kd.freq.map(d=>d[0]), datasets:[{{
-      label:"Appearances", data:kd.freq.map(d=>d[1]),
-      backgroundColor: kd.freq.map((_,i)=>`rgba(78,121,167,${{(0.9-0.5*i/Math.max(kd.freq.length,1)).toFixed(2)}})` ),
-      borderRadius:4,
-    }}] }},
-    options:merge(DEF, {{
-      indexAxis:"y",
-      plugins:{{
-        legend:{{ display:false }},
-        valLabel:{{ show:true }},
-      }},
-      scales:{{ x:{{ title:{{ display:true, text:"Film count", color:"#8892a4", font:{{ size:10 }} }}, ticks:{{ maxRotation:0 }} }}, y:{{ ticks:{{ font:{{ size:10 }} }} }} }}
+  // Chart 1 — Top Plot Keywords
+  C.kw1 = new Chart(document.getElementById('cKw1'), {{
+    type: 'bar',
+    data: {{
+      labels: D.top_kw_freq.map(d => d.kw),
+      datasets: [{{
+        label: 'Films',
+        data: D.top_kw_freq.map(d => d.count),
+        backgroundColor: D.top_kw_freq.map((_,i) => `rgba(74,158,255,${{(0.9-0.025*i).toFixed(2)}})` ),
+        borderRadius: 3,
+      }}]
+    }},
+    options: merge(DEF, {{
+      indexAxis: 'y',
+      plugins: {{ legend: {{ display: false }}, valLabel: {{ show: true }} }},
+      scales: {{
+        x: {{ title: {{ display: true, text: 'Film count', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4' }} }},
+        y: {{ title: {{ display: true, text: 'Keyword', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4', font: {{ size: 9 }} }} }}
+      }}
     }})
   }});
-  bindExternalTooltip(C.kwFreq, (dp) => ({{
-    title: dp.label,
+  bindExternalTooltip(C.kw1, dp => ({{
+    title: D.top_kw_freq[dp.dataIndex]?.kw,
     value: `${{dp.formattedValue}} films`,
-    films: D.top_by_kw?.[dp.label],
-    fmt: v => `★${{v}}`,
+    films: D.top_kw_freq[dp.dataIndex]?.films,
+    fmt: f => f.g ? ` · $${{(f.g/1e6).toFixed(0)}}M` : ''
   }}));
 
-  // Keyword score — colored by score bucket
-  C.kwScore = new Chart(document.getElementById("cKwScore"), {{
-    type:"bar",
-    data:{{ labels:kd.score.map(d=>d[0]), datasets:[{{
-      label:"Avg IMDB Score", data:kd.score.map(d=>d[1]),
-      backgroundColor: kd.score.map(d=>scoreColor(d[1], 0.85)),
-      borderRadius:4,
-    }}] }},
-    options:merge(DEF, {{
-      indexAxis:"y",
-      plugins:{{
-        legend:{{ display:false }},
-        valLabel:{{ show:true, fmt:v=>v.toFixed(1) }},
-      }},
-      scales:{{ x:{{ min:0, max:9, title:{{ display:true, text:"IMDB Score", color:"#8892a4", font:{{ size:10 }} }}, ticks:{{ maxRotation:0 }} }}, y:{{ ticks:{{ font:{{ size:10 }} }} }} }}
+  // Chart 2 — Genre Hierarchy
+  C.kw2 = new Chart(document.getElementById('cKw2'), {{
+    type: 'bar',
+    data: {{
+      labels: D.genre_treemap.map(d => d.genre),
+      datasets: [{{
+        label: 'Films',
+        data: D.genre_treemap.map(d => d.count),
+        backgroundColor: D.genre_treemap.map((_,i) => COLORS[i % COLORS.length]),
+        borderRadius: 3,
+      }}]
+    }},
+    options: merge(DEF, {{
+      indexAxis: 'y',
+      plugins: {{ legend: {{ display: false }}, valLabel: {{ show: true }} }},
+      scales: {{
+        x: {{ title: {{ display: true, text: 'Film count', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4' }} }},
+        y: {{ title: {{ display: true, text: 'Genre', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4', font: {{ size: 9 }} }} }}
+      }}
     }})
   }});
-  bindExternalTooltip(C.kwScore, (dp) => ({{
-    title: dp.label,
-    value: `★${{dp.formattedValue}} avg score`,
-    films: D.top_by_kw?.[dp.label],
-    fmt: v => `★${{v}}`,
-  }}));
-
-  // Country production — fading teal bars
-  C.countries = new Chart(document.getElementById("cCountries"), {{
-    type:"bar",
-    data:{{ labels:ctd.map(d=>d[0]), datasets:[{{
-      label:"Films", data:ctd.map(d=>d[1]),
-      backgroundColor: ctd.map((_,i)=>`rgba(89,161,79,${{(0.9-0.5*i/Math.max(ctd.length,1)).toFixed(2)}})` ),
-      borderRadius:4,
-    }}] }},
-    options:merge(DEF, {{
-      indexAxis:"y",
-      plugins:{{
-        legend:{{ display:false }},
-        valLabel:{{ show:true }},
-      }},
-      scales:{{ x:{{ title:{{ display:true, text:"Film count", color:"#8892a4", font:{{ size:10 }} }}, ticks:{{ maxRotation:0 }} }}, y:{{ ticks:{{ font:{{ size:10 }} }} }} }}
-    }})
-  }});
-  bindExternalTooltip(C.countries, (dp) => ({{
-    title: dp.label,
+  bindExternalTooltip(C.kw2, dp => ({{
+    title: D.genre_treemap[dp.dataIndex]?.genre,
     value: `${{dp.formattedValue}} films`,
-    films: D.top_by_country?.[dp.label],
-    fmt: v => `★${{v}}`,
+    films: D.genre_treemap[dp.dataIndex]?.films,
+    fmt: f => f.g ? ` · $${{(f.g/1e6).toFixed(0)}}M` : ''
   }}));
+
+  // Chart 3 — Keyword Word Cloud (custom canvas — zoom disabled via NO_ZOOM_CHARTS)
+  (function() {{
+    const container = document.getElementById('cKw3');
+    const wrap = container.closest('.chart-wrap');
+    let canvas = container.querySelector('canvas');
+    if (!canvas) {{
+      canvas = document.createElement('canvas');
+      canvas.style.cssText = 'width:100%;height:100%';
+      container.appendChild(canvas);
+    }}
+    const words = [...D.kw_cloud_data].sort((a, b) => b.freq - a.freq).slice(0, 60);
+    const maxF = words[0]?.freq || 1, minF = words[words.length - 1]?.freq || 1;
+    const scoreToColor = s => s >= 8 ? '#59a14f' : s >= 7 ? '#4a9eff' : s >= 6 ? '#edc948' : s >= 5 ? '#f28e2b' : '#e15759';
+    let placed = [];
+
+    function kwFilms(kw) {{
+      const hit = D.top_kw_freq.find(d => d.kw === kw);
+      if (hit?.films) return hit.films;
+      return (D.kw_film_index && D.kw_film_index[kw]) || [];
+    }}
+
+    function overlaps(x, tw, y, th) {{
+      // candidate box: left=x, right=x+tw, top=y-th, bottom=y
+      // stored box:   left=p.x, right=p.x+p.w, top=p.y, bottom=p.y+p.h
+      return placed.some(p => !(x + tw <= p.x || x >= p.x + p.w || (y - th) >= (p.y + p.h) || y <= p.y));
+    }}
+
+    function draw() {{
+      const W = wrap?.offsetWidth || container.offsetWidth || 0;
+      const H = wrap?.offsetHeight || 0;
+      if (W < 10 || H < 10) return;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#12141f';
+      ctx.fillRect(0, 0, W, H);
+      placed = [];
+      words.forEach((w, wi) => {{
+        const size = Math.round(12 + (w.freq - minF) / (maxF - minF + 1) * 36);
+        ctx.font = `bold ${{size}}px sans-serif`;
+        const tw = ctx.measureText(w.text).width + 8, th = size + 6;
+        ctx.fillStyle = scoreToColor(w.score || 6);
+        let placedFlag = false;
+        const startAngle = wi * 2.1;
+        for (let step = 0; step < 4000; step++) {{
+          const angle = startAngle + step * 0.25;
+          const r = 1.8 * angle;
+          if (r > Math.max(W, H)) break;
+          const x = W / 2 + r * Math.cos(angle) - tw / 2;
+          const y = H / 2 + r * Math.sin(angle) + size / 2;
+          if (x < 2 || y < size || x + tw > W - 2 || y > H - 2) continue;
+          if (!overlaps(x, tw, y, th)) {{
+            ctx.fillText(w.text, x, y);
+            placed.push({{ x, y: y - th, w: tw, h: th, text: w.text, freq: w.freq }});
+            placedFlag = true;
+            break;
+          }}
+        }}
+        if (!placedFlag) {{
+          for (let a = 0; a < 60; a++) {{
+            const x = Math.random() * (W - tw), y = Math.random() * (H - th) + size;
+            if (!overlaps(x, tw, y, th)) {{
+              ctx.fillText(w.text, x, y);
+              placed.push({{ x, y: y - th, w: tw, h: th, text: w.text, freq: w.freq }});
+              break;
+            }}
+          }}
+        }}
+      }});
+    }}
+
+    function hitWord(mx, my) {{
+      const rect = canvas.getBoundingClientRect();
+      const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+      const cx = (mx - rect.left) * sx, cy = (my - rect.top) * sy;
+      for (let i = placed.length - 1; i >= 0; i--) {{
+        const p = placed[i];
+        if (cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + p.h) return p;
+      }}
+      return null;
+    }}
+
+    function positionCanvasTip(cx, cy) {{
+      const pad = 12;
+      let x = cx + 12, y = cy + 12;
+      const pw = chartTooltip.offsetWidth || 220, ph = chartTooltip.offsetHeight || 100;
+      if (x + pw + pad > window.innerWidth) x = Math.max(pad, cx - pw - 12);
+      if (y + ph + pad > window.innerHeight) y = Math.max(pad, cy - ph - 12);
+      chartTooltip.style.left = x + 'px';
+      chartTooltip.style.top = y + 'px';
+    }}
+
+    draw();
+    if (typeof ResizeObserver !== 'undefined' && wrap) {{
+      new ResizeObserver(() => draw()).observe(wrap);
+    }}
+    canvas.addEventListener('mousemove', e => {{
+      const hit = hitWord(e.clientX, e.clientY);
+      if (!hit) {{ hideChartTooltip(); return; }}
+      const films = kwFilms(hit.text).slice(0, 5);
+      chartTooltip.innerHTML = buildTooltipHTML(hit.text, `${{hit.freq}} films`, films, f => f.g ? ` · $${{(f.g/1e6).toFixed(0)}}M` : '');
+      chartTooltip.style.display = 'block';
+      chartTooltip.style.opacity = '1';
+      positionCanvasTip(e.clientX, e.clientY);
+    }});
+    canvas.addEventListener('mouseleave', hideChartTooltip);
+  }})();
+
+  // Chart 4 — Social Reach Box Plot (custom canvas — zoom disabled via NO_ZOOM_CHARTS)
+  (function() {{
+    const canvas = document.getElementById('cKw4');
+    const wrap = canvas.closest('.chart-wrap');
+    const data = D.kw_social_box;
+    let boxes = [];
+
+    function draw() {{
+      const W = wrap?.offsetWidth || canvas.parentElement.offsetWidth || 0;
+      const H = wrap?.offsetHeight || 0;
+      if (W < 10 || H < 10) return;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#12141f';
+      ctx.fillRect(0, 0, W, H);
+      boxes = [];
+      if (!data.length) return;
+      const ml = 60, mr = 20, mt = 20, mb = 30;
+      const bw = Math.floor((W - ml - mr) / data.length);
+      const allVals = data.flatMap(d => [d.stats.whislo, d.stats.whishi]);
+      const maxV = Math.max(...allVals), minV = 0;
+      const scaleY = v => mt + (H - mt - mb) * (1 - (v - minV) / (maxV - minV));
+      ctx.fillStyle = '#8892a4'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+      [0, 0.25, 0.5, 0.75, 1].forEach(t => {{
+        const v = minV + (maxV - minV) * t;
+        ctx.fillText((v / 1000).toFixed(0) + 'k', ml - 4, scaleY(v) + 3);
+      }});
+      data.forEach((d, i) => {{
+        const s = d.stats, cx = ml + i * bw + bw / 2;
+        const q1y = scaleY(s.q1), q3y = scaleY(s.q3), medy = scaleY(s.median), lowy = scaleY(s.whislo), highy = scaleY(s.whishi);
+        const bx = cx - bw * 0.3, by = q3y, bw2 = bw * 0.6, bh = q1y - q3y;
+        boxes.push({{ x: bx, y: by, w: bw2, h: bh, idx: i, cx, lowy, highy }});
+        ctx.strokeStyle = '#4a9eff'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx, lowy); ctx.lineTo(cx, highy); ctx.stroke();
+        ctx.fillStyle = 'rgba(74,158,255,0.3)'; ctx.strokeStyle = '#4a9eff';
+        ctx.fillRect(bx, by, bw2, bh);
+        ctx.strokeRect(bx, by, bw2, bh);
+        ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx - bw * 0.3, medy); ctx.lineTo(cx + bw * 0.3, medy); ctx.stroke();
+        ctx.fillStyle = '#8892a4'; ctx.font = '8px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(d.kw.slice(0, 8), cx, H - mb + 12);
+      }});
+    }}
+
+    function hitBox(mx, my) {{
+      const rect = canvas.getBoundingClientRect();
+      const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+      const cx = (mx - rect.left) * sx, cy = (my - rect.top) * sy;
+      for (const b of boxes) {{
+        const top = Math.min(b.y, b.lowy, b.highy);
+        const bot = Math.max(b.y + b.h, b.lowy, b.highy);
+        if (Math.abs(cx - b.cx) <= b.w / 2 + 4 && cy >= top && cy <= bot) return b;
+      }}
+      return null;
+    }}
+
+    function positionCanvasTip(cx, cy) {{
+      const pad = 12;
+      let x = cx + 12, y = cy + 12;
+      const pw = chartTooltip.offsetWidth || 220, ph = chartTooltip.offsetHeight || 100;
+      if (x + pw + pad > window.innerWidth) x = Math.max(pad, cx - pw - 12);
+      if (y + ph + pad > window.innerHeight) y = Math.max(pad, cy - ph - 12);
+      chartTooltip.style.left = x + 'px';
+      chartTooltip.style.top = y + 'px';
+    }}
+
+    draw();
+    if (typeof ResizeObserver !== 'undefined' && wrap) {{
+      new ResizeObserver(() => draw()).observe(wrap);
+    }}
+    canvas.addEventListener('mousemove', e => {{
+      const hit = hitBox(e.clientX, e.clientY);
+      if (!hit) {{ hideChartTooltip(); return; }}
+      const d = data[hit.idx];
+      const med = d.stats.median;
+      const films = (d.films || []).slice(0, 5).map(f => ({{ t: f.t, s: f.s, y: f.y, g: null }}));
+      chartTooltip.innerHTML = buildTooltipHTML(d.kw, `median reach: ${{(med/1000).toFixed(0)}}k`, films, f => f.s ? ` · ★${{f.s}}` : '');
+      chartTooltip.style.display = 'block';
+      chartTooltip.style.opacity = '1';
+      positionCanvasTip(e.clientX, e.clientY);
+    }});
+    canvas.addEventListener('mouseleave', hideChartTooltip);
+  }})();
+
+  // Deterministic jitter — breaks up overlapping points/bubbles at same coordinates
+  function kwSeededJitter(seed, spread=0.05) {{
+    let h = 0;
+    const s = String(seed);
+    for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    return ((h >>> 1) / 0x7FFFFFFF - 0.5) * spread;
+  }}
+
+  // Chart 5 — Genre Audience Engagement
+  const genreColors5 = {{}};
+  const topGenres5 = [...new Set(D.bubble_data.map(d=>d.genre))];
+  topGenres5.forEach((g,i)=>{{ genreColors5[g]=COLORS[i%COLORS.length]; }});
+  const _maxBubbleR = Math.max(...D.bubble_data.map(d=>d.r)) || 1;
+  C.kw5 = new Chart(document.getElementById('cKw5'), {{
+    type: 'bubble',
+    data: {{
+      datasets: topGenres5.map(g => ({{
+        label: g,
+        data: D.bubble_data.filter(d=>d.genre===g).map(d=>({{
+          x: d.x * (1 + kwSeededJitter(d.t, 0.1)),
+          ox: d.x,
+          y: d.y,
+          r: Math.max(3, Math.min(18, 3 + 15 * d.r / _maxBubbleR)),
+          _d: d,
+        }})),
+        backgroundColor: genreColors5[g]+'b3',
+        borderColor: genreColors5[g],
+        borderWidth: 0,
+        pointRadius: 4,
+        pointHoverRadius: 7,
+      }}))
+    }},
+    options: merge(DEF, {{
+      plugins: {{ legend: {{ labels: {{ color:'#8892a4',font:{{size:9}},boxWidth:10 }} }} }},
+      scales: {{
+        x: {{ type:'logarithmic', title:{{display:true,text:'Votes (log)',color:'#8892a4',font:{{size:10}}}}, ticks:{{color:'#8892a4'}} }},
+        y: {{ min:0,max:10, title:{{display:true,text:'IMDb Score',color:'#8892a4',font:{{size:10}}}}, ticks:{{color:'#8892a4'}} }}
+      }}
+    }})
+  }});
+  bindExternalTooltip(C.kw5, dp => {{
+    const d = dp.raw?._d;
+    const genre = d?.genre;
+    const genreFilms = D.bubble_data
+      .filter(b => b.genre === genre)
+      .sort((a, b) => b.x - a.x)
+      .slice(0, 5)
+      .map(f => ({{ t: f.t, s: f.y, yr: f.yr }}));
+    return {{
+      title: d?.t || '',
+      value: `votes: ${{(d?.x || 0).toLocaleString()}} · score: ${{d?.y}} · reviews: ${{(d?.r || 0).toLocaleString()}}`,
+      films: genreFilms,
+      fmt: f => f.s ? ` · ★${{f.s}}` : ''
+    }};
+  }});
+
+  // Chart 6 — Cast Star-Power by Keyword
+  C.kw6 = new Chart(document.getElementById('cKw6'), {{
+    type: 'bar',
+    data: {{
+      labels: D.kw_cast_avg.map(d=>d.kw),
+      datasets: [{{
+        label: 'Avg Cast FB Likes',
+        data: D.kw_cast_avg.map(d=>d.avg_cast_fb),
+        backgroundColor: D.kw_cast_avg.map((_,i)=>`rgba(237,201,72,${{(0.9-0.05*i).toFixed(2)}})` ),
+        borderRadius: 3,
+      }}]
+    }},
+    options: merge(DEF, {{
+      indexAxis:'y',
+      plugins: {{ legend:{{display:false}}, valLabel:{{show:true,fmt:v=>(v/1000).toFixed(0)+'k'}} }},
+      scales: {{
+        x: {{ title: {{ display: true, text: 'Avg cast Facebook likes', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4' }} }},
+        y: {{ title: {{ display: true, text: 'Keyword', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4', font: {{ size: 9 }} }} }}
+      }}
+    }})
+  }});
+  bindExternalTooltip(C.kw6, dp => ({{
+    title: D.kw_cast_avg[dp.dataIndex]?.kw,
+    value: `avg cast FB: ${{(dp.raw/1000).toFixed(0)}}k · ${{D.kw_cast_avg[dp.dataIndex]?.count}} films`,
+    films: D.kw_cast_avg[dp.dataIndex]?.films,
+    fmt: f => ` · ${{(f.cast_fb/1000).toFixed(0)}}k FB`
+  }}));
+
+  // Chart 7 — Box Office Scatter
+  const breakEvenPlugin = {{
+    id:'breakEven',
+    afterDraw(chart) {{
+      if(chart!==C.kw7) return;
+      const {{ctx:c,scales:{{x,y}}}} = chart;
+      const x0=x.getPixelForValue(0), y0=y.getPixelForValue(0);
+      const xMax=x.getPixelForValue(x.max), yMax=y.getPixelForValue(x.max);
+      c.save(); c.strokeStyle='rgba(255,255,255,0.25)'; c.lineWidth=1; c.setLineDash([5,5]);
+      c.beginPath(); c.moveTo(x0,y0); c.lineTo(xMax,yMax); c.stroke(); c.restore();
+    }}
+  }};
+  Chart.register(breakEvenPlugin);
+  const genres7 = [...new Set(D.boxoffice_pts.map(d=>d.genre))].slice(0,10);
+  const gColor7 = {{}};
+  genres7.forEach((g,i)=>{{gColor7[g]=COLORS[i%COLORS.length];}});
+  C.kw7 = new Chart(document.getElementById('cKw7'), {{
+    type: 'scatter',
+    data: {{
+      datasets: [{{
+        label: 'Films',
+        data: D.boxoffice_pts.map(d=>({{
+          x: d.x * (1 + kwSeededJitter(d.t, 0.05)),
+          y: d.y * (1 + kwSeededJitter(d.t + '|y', 0.05)),
+          ox: d.x,
+          oy: d.y,
+          _d: d,
+        }})),
+        backgroundColor: D.boxoffice_pts.map(d=>(gColor7[d.genre]||'#4a9eff')+'b3'),
+        pointRadius: 4,
+        pointHoverRadius: 7,
+        borderWidth: 0,
+      }}]
+    }},
+    options: merge(DEF, {{
+      plugins: {{ legend:{{display:false}} }},
+      scales: {{
+        x: {{ title:{{display:true,text:'Budget ($M)',color:'#8892a4',font:{{size:10}}}}, ticks:{{color:'#8892a4'}} }},
+        y: {{ title:{{display:true,text:'Gross ($M)',color:'#8892a4',font:{{size:10}}}}, ticks:{{color:'#8892a4'}} }}
+      }}
+    }})
+  }});
+  bindExternalTooltip(C.kw7, dp => {{
+    const raw = dp.raw;
+    const d = raw?._d;
+    const yr = d?.yr ?? '—';
+    const sc = d?.s != null ? `★${{d.s}}` : '—';
+    const budget = raw?.ox != null ? `$${{raw.ox}}M budget` : '—';
+    const gross = raw?.oy != null ? `$${{raw.oy}}M gross` : '—';
+    const genre = d?.genre || '—';
+    return {{
+      title: d?.t || '',
+      value: `${{yr}} · ${{sc}} · ${{budget}} · ${{gross}} · ${{genre}}`,
+      films: null
+    }};
+  }});
+
+  // Chart 8 — Genre Profit Margins
+  C.kw8 = new Chart(document.getElementById('cKw8'), {{
+    type: 'bar',
+    data: {{
+      labels: D.genre_roi_data.map(d=>d.genre),
+      datasets: [
+        {{ label:'Median ROI %', data:D.genre_roi_data.map(d=>d.median), backgroundColor:'rgba(74,158,255,0.7)', borderRadius:3 }},
+        {{ label:'Avg ROI %', data:D.genre_roi_data.map(d=>d.avg), backgroundColor:'rgba(89,161,79,0.7)', borderRadius:3, type:'bar' }}
+      ]
+    }},
+    options: merge(DEF, {{
+      plugins: {{ legend:{{labels:{{color:'#8892a4',font:{{size:9}},boxWidth:10}}}} }},
+      scales: {{
+        x: {{ ticks:{{color:'#8892a4',font:{{size:9}}}} }},
+        y: {{ title:{{display:true,text:'ROI %',color:'#8892a4',font:{{size:10}}}}, ticks:{{color:'#8892a4'}} }}
+      }}
+    }})
+  }});
+  bindExternalTooltip(C.kw8, dp => {{
+    const d = D.genre_roi_data[dp.dataIndex];
+    if (!d) return {{ title: '', value: '', films: null }};
+    const dsLabel = dp.dataset?.label || '';
+    const highlighted = dsLabel.includes('Median') ? `Median: ${{d.median}}%` : `Avg: ${{d.avg}}%`;
+    return {{
+      title: d.genre,
+      value: `${{highlighted}} · Median: ${{d.median}}% · Avg: ${{d.avg}}% · ${{d.count}} films`,
+      films: d.films,
+      fmt: f => {{
+        const yr = f.y ? ` · ${{f.y}}` : '';
+        const sc = f.s ? ` · ★${{f.s}}` : '';
+        const gr = f.g ? ` · $${{(f.g/1e6).toFixed(0)}}M gross` : '';
+        return `${{yr}}${{sc}}${{gr}} · ROI ${{f.roi}}%`;
+      }}
+    }};
+  }});
+
+  // Chart 9 — Co-Occurrence Network (custom canvas — zoom disabled via NO_ZOOM_CHARTS)
+  (function() {{
+    const canvas = document.getElementById('cKw9');
+    const wrap = canvas.closest('.chart-wrap');
+    const edges = D.cooc_top.slice(0, 25);
+    let nodes = [];
+
+    function coocKwFilms(kw) {{
+      return (D.kw_film_index && D.kw_film_index[kw]) || [];
+    }}
+
+    function draw() {{
+      const W = wrap?.offsetWidth || canvas.parentElement.offsetWidth || 0;
+      const H = wrap?.offsetHeight || 0;
+      if (W < 10 || H < 10) return;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#12141f';
+      ctx.fillRect(0, 0, W, H);
+      const nodeSet = {{}};
+      edges.forEach(e => {{ nodeSet[e.a] = true; nodeSet[e.b] = true; }});
+      const nodeList = Object.keys(nodeSet);
+      nodes = nodeList.map((id, i) => {{
+        const angle = 2 * Math.PI * i / nodeList.length;
+        const freq = edges.filter(e => e.a === id || e.b === id).reduce((s, e) => s + e.count, 0);
+        return {{ id, x: W / 2 + Math.cos(angle) * 120, y: H / 2 + Math.sin(angle) * 90, vx: 0, vy: 0, freq, r: 8 }};
+      }});
+      const nmap = {{}};
+      nodes.forEach(n => {{ nmap[n.id] = n; }});
+      for (let i = 0; i < 150; i++) {{
+        nodes.forEach(a => nodes.forEach(b => {{
+          if (a === b) return;
+          const dx = a.x - b.x, dy = a.y - b.y, d = Math.sqrt(dx * dx + dy * dy) || 1, f = 600 / (d * d);
+          a.vx += dx / d * f; a.vy += dy / d * f;
+        }}));
+        edges.forEach(e => {{
+          const a = nmap[e.a], b = nmap[e.b];
+          if (!a || !b) return;
+          const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1, s = (d - 70) * 0.05 * (e.count / 3);
+          a.vx += dx / d * s; a.vy += dy / d * s; b.vx -= dx / d * s; b.vy -= dy / d * s;
+        }});
+        nodes.forEach(n => {{
+          n.vx += (W / 2 - n.x) * 0.01; n.vy += (H / 2 - n.y) * 0.01;
+          n.vx *= 0.8; n.vy *= 0.8;
+          n.x = Math.max(25, Math.min(W - 25, n.x + n.vx));
+          n.y = Math.max(15, Math.min(H - 15, n.y + n.vy));
+        }});
+      }}
+      const maxC = Math.max(...edges.map(e => e.count));
+      edges.forEach(e => {{
+        const a = nmap[e.a], b = nmap[e.b];
+        if (!a || !b) return;
+        ctx.strokeStyle = `rgba(74,158,255,${{(0.1 + 0.7 * e.count / maxC).toFixed(2)}})`;
+        ctx.lineWidth = 1 + 2 * e.count / maxC;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }});
+      const maxFreq = Math.max(...nodes.map(n => n.freq));
+      nodes.forEach(n => {{
+        n.r = 4 + 7 * n.freq / maxFreq;
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fillStyle = '#4a9eff'; ctx.fill();
+        ctx.fillStyle = '#e2e8f0'; ctx.font = `${{Math.max(8, Math.min(10, n.r * 1.2))}}px sans-serif`; ctx.textAlign = 'center';
+        ctx.fillText(n.id, n.x, n.y - n.r - 2);
+      }});
+    }}
+
+    function hitNode(mx, my) {{
+      const rect = canvas.getBoundingClientRect();
+      const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+      const cx = (mx - rect.left) * sx, cy = (my - rect.top) * sy;
+      let best = null, bestD = Infinity;
+      nodes.forEach(n => {{
+        const d = Math.sqrt((cx - n.x) ** 2 + (cy - n.y) ** 2);
+        if (d <= n.r + 4 && d < bestD) {{ best = n; bestD = d; }}
+      }});
+      return best;
+    }}
+
+    function positionCanvasTip(cx, cy) {{
+      const pad = 12;
+      let x = cx + 12, y = cy + 12;
+      const pw = chartTooltip.offsetWidth || 220, ph = chartTooltip.offsetHeight || 100;
+      if (x + pw + pad > window.innerWidth) x = Math.max(pad, cx - pw - 12);
+      if (y + ph + pad > window.innerHeight) y = Math.max(pad, cy - ph - 12);
+      chartTooltip.style.left = x + 'px';
+      chartTooltip.style.top = y + 'px';
+    }}
+
+    draw();
+    if (typeof ResizeObserver !== 'undefined' && wrap) {{
+      new ResizeObserver(() => draw()).observe(wrap);
+    }}
+    canvas.addEventListener('mousemove', e => {{
+      const hit = hitNode(e.clientX, e.clientY);
+      if (!hit) {{ hideChartTooltip(); return; }}
+      const films = coocKwFilms(hit.id).slice(0, 5);
+      chartTooltip.innerHTML = buildTooltipHTML(hit.id, `${{hit.freq}} co-occurrences`, films, f => f.g ? ` · $${{(f.g/1e6).toFixed(0)}}M` : '');
+      chartTooltip.style.display = 'block';
+      chartTooltip.style.opacity = '1';
+      positionCanvasTip(e.clientX, e.clientY);
+    }});
+    canvas.addEventListener('mouseleave', hideChartTooltip);
+  }})();
+
+  // Chart 10 — Poster Faces vs Social Reach
+  C.kw10 = new Chart(document.getElementById('cKw10'), {{
+    type: 'bar',
+    data: {{
+      labels: D.faces_chart.map(d=>`${{d.faces}} face${{d.faces!==1?'s':''}}`),
+      datasets: [{{
+        label: 'Avg FB Likes',
+        data: D.faces_chart.map(d=>d.avg_fb),
+        backgroundColor: D.faces_chart.map((_,i)=>`rgba(176,122,161,${{(0.9-0.05*i).toFixed(2)}})` ),
+        borderRadius: 3,
+      }}]
+    }},
+    options: merge(DEF, {{
+      layout: {{ padding: {{ top: 4, bottom: 0, left: 2, right: 2 }} }},
+      plugins: {{ legend:{{display:false}}, valLabel:{{show:true,fmt:v=>(v/1000).toFixed(0)+'k'}} }},
+      scales: {{
+        x: {{ ticks:{{ color:'#8892a4', padding: 2 }}, grid:{{ display:false }} }},
+        y: {{
+          beginAtZero: true,
+          grace: '2%',
+          title:{{ display:true, text:'Avg FB Likes', color:'#8892a4', font:{{size:10}} }},
+          ticks:{{ color:'#8892a4', padding: 4 }},
+        }},
+      }},
+    }})
+  }});
+  bindExternalTooltip(C.kw10, dp => ({{
+    title: `${{D.faces_chart[dp.dataIndex]?.faces}} faces — ${{D.faces_chart[dp.dataIndex]?.count}} films`,
+    value: `avg FB: ${{(dp.raw/1000).toFixed(0)}}k`,
+    films: D.faces_chart[dp.dataIndex]?.films,
+    fmt: f => ` · ${{(f.y/1000).toFixed(0)}}k FB`
+  }}));
+
+  // Chart 11 — Director Brand Multiplier
+  C.kw11 = new Chart(document.getElementById('cKw11'), {{
+    type: 'bar',
+    data: {{
+      labels: D.dir_brand.slice(0,15).map(d=>d.director.split(' ').pop()),
+      datasets: [
+        {{ label:'Dir. FB Likes', data:D.dir_brand.slice(0,15).map(d=>d.dir_fb), backgroundColor:'rgba(74,158,255,0.7)', borderRadius:3 }},
+        {{ label:'Movie FB Likes', data:D.dir_brand.slice(0,15).map(d=>d.movie_fb), backgroundColor:'rgba(89,161,79,0.7)', borderRadius:3 }}
+      ]
+    }},
+    options: merge(DEF, {{
+      plugins: {{ legend:{{labels:{{color:'#8892a4',font:{{size:9}},boxWidth:10}}}} }},
+      scales: {{
+        x:{{ticks:{{color:'#8892a4',font:{{size:9}}}}}},
+        y:{{ticks:{{color:'#8892a4'}},title:{{display:true,text:'FB Likes',color:'#8892a4',font:{{size:10}}}}}}
+      }}
+    }})
+  }});
+  bindExternalTooltip(C.kw11, dp => ({{
+    title: D.dir_brand[dp.dataIndex]?.director,
+    value: `dir FB: ${{(D.dir_brand[dp.dataIndex]?.dir_fb/1000).toFixed(0)}}k · movie FB: ${{(D.dir_brand[dp.dataIndex]?.movie_fb/1000).toFixed(0)}}k · multiplier: ${{D.dir_brand[dp.dataIndex]?.multiplier}}x`,
+    films: D.dir_brand[dp.dataIndex]?.films,
+    fmt: f => ` · ${{(f.movie_fb/1000).toFixed(0)}}k FB`
+  }}));
+
+  // Chart 12 — Financial Trends Over Time
+  C.kw12 = new Chart(document.getElementById('cKw12'), {{
+    type: 'line',
+    data: {{
+      labels: D.fin_trend_data.map(d=>d.year),
+      datasets: [
+        {{ label:'Avg Budget ($M)', data:D.fin_trend_data.map(d=>d.avg_budget), borderColor:'#4a9eff', backgroundColor:'rgba(74,158,255,0.1)', fill:true, tension:0.3, pointRadius:2 }},
+        {{ label:'Avg Gross ($M)', data:D.fin_trend_data.map(d=>d.avg_gross), borderColor:'#59a14f', backgroundColor:'rgba(89,161,79,0.1)', fill:true, tension:0.3, pointRadius:2 }},
+        {{ label:'Avg ROI %', data:D.fin_trend_data.map(d=>d.avg_roi), borderColor:'#edc948', backgroundColor:'transparent', tension:0.3, pointRadius:2, yAxisID:'y2' }}
+      ]
+    }},
+    options: merge(DEF, {{
+      plugins: {{
+        legend:{{labels:{{color:'#8892a4',font:{{size:9}},boxWidth:10}}}},
+      }},
+      scales: {{
+        x: {{ title: {{ display: true, text: 'Year', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4', font: {{ size: 9 }}, maxRotation: 45 }} }},
+        y: {{ title: {{ display: true, text: 'Avg budget / gross ($M)', color: '#8892a4', font: {{ size: 10 }} }}, ticks: {{ color: '#8892a4' }} }},
+        y2: {{ position: 'right', title: {{ display: true, text: 'Avg ROI (%)', color: '#edc948', font: {{ size: 10 }} }}, ticks: {{ color: '#edc948' }}, grid: {{ display: false }} }}
+      }}
+    }})
+  }});
+  bindExternalTooltip(C.kw12, dp => ({{
+    title: `Year ${{D.fin_trend_data[dp.dataIndex]?.year}}`,
+    value: `budget: $${{D.fin_trend_data[dp.dataIndex]?.avg_budget}}M · gross: $${{D.fin_trend_data[dp.dataIndex]?.avg_gross}}M · ROI: ${{D.fin_trend_data[dp.dataIndex]?.avg_roi}}%`,
+    films: D.fin_trend_data[dp.dataIndex]?.films,
+    fmt: f => ` · G:$${{f.g}}M`
+  }}));
+
+  // Chart 13 — Duration vs Score
+  (function() {{
+    const ratingOrder = ['G','PG','PG-13','R','NC-17','NR','Not Rated','Unrated','Approved','Passed','TV-14','TV-MA','TV-PG','TV-G'];
+    const allRatings = [...new Set(D.duration_score.map(d=>d.rating))];
+    const ratings = ratingOrder.filter(r=>allRatings.includes(r)).concat(allRatings.filter(r=>!ratingOrder.includes(r))).slice(0,8);
+    const ratingColors = {{}};
+    ratings.forEach((r,i)=>{{ ratingColors[r]=COLORS[i%COLORS.length]; }});
+    C.kw13 = new Chart(document.getElementById('cKw13'), {{
+      type: 'scatter',
+      data: {{
+        datasets: ratings.map(r=>{{
+          const pts = D.duration_score.filter(d=>d.rating===r).map(d=>(({{
+            x: d.x + kwSeededJitter(d.t, 4),
+            ox: d.x, y: d.y, _d: d,
+          }})));
+          return {{
+            label: r,
+            data: pts,
+            backgroundColor: ratingColors[r]+'b3',
+            borderColor: ratingColors[r],
+            borderWidth: 0,
+            pointRadius: 4,
+            pointHoverRadius: 7,
+          }};
+        }})
+      }},
+      options: merge(DEF, {{
+        plugins:{{
+          legend:{{
+            display:true,
+            position:'bottom',
+            labels:{{color:'#8892a4',font:{{size:9}},boxWidth:10,padding:8}}
+          }}
+        }},
+        scales:{{
+          x:{{title:{{display:true,text:'Duration (min · ±2 min jitter)',color:'#8892a4',font:{{size:10}}}},ticks:{{color:'#8892a4'}}}},
+          y:{{min:0,max:10,title:{{display:true,text:'IMDb Score',color:'#8892a4',font:{{size:10}}}},ticks:{{color:'#8892a4'}}}}
+        }}
+      }})
+    }});
+  }})();
+  bindExternalTooltip(C.kw13, dp => {{
+    const raw = dp.raw;
+    const d = raw?._d;
+    const yr = d?.yr ?? '—';
+    const dur = raw?.ox ?? d?.x ?? '—';
+    const sc = d?.y != null ? `★${{d.y}}` : '—';
+    const gross = d?.g != null ? `$${{(d.g/1e6).toFixed(0)}}M gross` : null;
+    const votes = d?.v != null ? `${{d.v.toLocaleString()}} votes` : null;
+    const rating = d?.rating || '—';
+    const parts = [`${{yr}} · ${{dur}} min · ${{sc}} · ${{rating}}`];
+    if (gross) parts.push(gross);
+    if (votes) parts.push(votes);
+    return {{
+      title: d?.t || '',
+      value: parts.join(' · '),
+      films: null
+    }};
+  }});
 }}
 
 // ── ERA ANALYSIS ──────────────────────────────────────────────────────────────
@@ -3754,34 +4721,89 @@ const CHART_INFO = {{
     why: "Doughnut chart is ideal for part-of-whole relationships with a small number of categories (≤ 8). The hollow center lets proportions breathe and keeps focus on the arc lengths rather than raw counts.",
     what: "Shows how the dataset splits by audience certification — which age demographics dominate production and whether the industry skews toward broad-audience or restricted content."
   }},
-  cKwFreq: {{
-    why: "Horizontal ranked bars with fading opacity encode both frequency and rank visually. Horizontal layout is necessary to accommodate multi-word keyword phrases without truncation.",
-    what: "Surfaces recurring narrative themes and plot elements across the entire dataset — a proxy for what stories the film industry keeps returning to."
+  cKw1: {{
+    why: "Horizontal ranked bars with fading opacity encode both frequency and rank visually. Horizontal layout accommodates multi-word keyword phrases without truncation.",
+    what: "Surfaces the most recurring plot keywords across all films — a proxy for dominant narrative themes in the dataset."
   }},
-  cKwScore: {{
-    why: "Score-colored bars let quality signal be read at a glance without scanning the axis. Ranking by average score instead of frequency highlights thematic quality, not just volume.",
-    what: "Identifies narrative elements that statistically co-occur with well-received films. These themes don't just appear often — they correlate with audience approval."
+  cKw2: {{
+    why: "Sorted horizontal bars approximate a treemap hierarchy when native treemap support is unavailable, keeping genre labels readable at a glance.",
+    what: "Shows which genres dominate production volume and how the dataset's genre landscape is structured."
   }},
-  cCountries: {{
-    why: "Ranked horizontal bars with opacity gradient visualise both volume and relative standing simultaneously. Country names fit cleanly on horizontal labels.",
-    what: "Shows the geographic distribution of film production and exposes US dominance alongside which other national industries contribute meaningfully to the dataset."
+  cKw3: {{
+    why: "Canvas word cloud places keywords spatially with size proportional to frequency and color mapped to average IMDb score — two dimensions in one view.",
+    what: "Reveals which plot themes are both common and quality-associated; larger words appear more often, greener words rate higher on average."
+  }},
+  cKw4: {{
+    why: "Custom box-plot canvas shows distribution spread (quartiles, whiskers, median) per keyword — more informative than a single average for skewed social metrics.",
+    what: "Compares Facebook-like distributions for films sharing top keywords, exposing whether social reach is consistent or driven by outliers."
+  }},
+  cKw5: {{
+    why: "Bubble scatter with log-scaled votes axis handles the enormous vote-count range. Bubble radius encodes review volume as a third engagement dimension.",
+    what: "Maps how audience scale (votes), quality (score), and review activity interact per genre — identifying genres with broad vs niche appeal."
+  }},
+  cKw6: {{
+    why: "Horizontal bars ranked by average cast Facebook likes link narrative themes to casting star-power, a metric unavailable in standard genre charts.",
+    what: "Shows which keyword themes attract films with high-profile casts — useful for understanding marketing and talent-attachment patterns."
+  }},
+  cKw7: {{
+    why: "Scatter plot with a break-even diagonal (budget = gross) instantly separates profitable from loss-making films. Genre coloring adds a categorical lens.",
+    what: "Exposes the budget-to-gross relationship across genres; points above the diagonal recovered costs, below did not. Pre-1970 financial data is sparse.",
+    caveats: "Financial data: currency-filtered · pre-1970 figures sparse and unreliable · dataset ends mid-2016."
+  }},
+  cKw8: {{
+    why: "Grouped median and average ROI bars per genre compare typical returns vs mean returns — medians resist outlier distortion better than means alone.",
+    what: "Reveals risk-reward profiles by genre: which genres reliably return investment vs which have volatile or negative ROI distributions.",
+    caveats: "ROI derived from US-reported budget/gross. Low-budget genres may be skewed by outliers."
+  }},
+  cKw9: {{
+    why: "Force-directed network layout groups keywords that co-occur in the same films. Edge weight scales with co-occurrence frequency.",
+    what: "Maps thematic clusters — keywords that appear together reveal narrative bundles (e.g. 'murder' + 'investigation' form a crime cluster)."
+  }},
+  cKw10: {{
+    why: "Bar chart aggregating average Facebook likes by poster face-count tests whether more visible cast faces correlate with higher social reach.",
+    what: "Shows whether films with more faces on the poster tend to attract more Facebook engagement — a proxy for marketing visibility."
+  }},
+  cKw11: {{
+    why: "Grouped bars compare director personal-brand reach (director FB likes) against their films' social reach, surfacing brand-transfer effects.",
+    what: "Identifies directors whose personal social following amplifies (or fails to amplify) their films' Facebook presence."
+  }},
+  cKw12: {{
+    why: "Multi-line chart with dual Y-axes plots budget/gross ($M) and ROI (%) on the same timeline. incompleteYearPlugin flags sparse pre-1970 and partial 2016 data.",
+    what: "Tracks how average film economics evolved year-over-year — rising budgets, grosses, and whether ROI kept pace.",
+    caveats: "Pre-1970 data is sparse; trend lines may not be representative. 2016 is partial-year."
+  }},
+  cKw13: {{
+    why: "Scatter colored by content rating tests whether runtime correlates with perceived quality and whether ratings cluster at certain durations.",
+    what: "Explores the relationship between film length and IMDb score across MPAA/content ratings — do longer films rate higher?"
   }},
 }};
 
 // ── Chart zoom modal ─────────────────────────────────────────────────────────
+
+// Custom canvas charts (cKw3 word cloud, cKw4 box plot, cKw9 network) render via raw
+// canvas draw() — zoom clones Chart.js via CANVAS_TO_C, so expand is disabled for these.
+const NO_ZOOM_CHARTS = new Set(['cKw3', 'cKw4', 'cKw9']);
 
 const CANVAS_TO_C = {{
   cMovies: 'movies', cScores: 'scores', cGross: 'gross',
   cScatter: 'scatter', cROI: 'roi', cGenreGross: 'genreGross',
   cGenreROI: 'genreROI', cGenreScore: 'genreScore', cGenreTrends: 'genreTrends',
   cEngagement: 'engagement', cScoreDist: 'scoreDist', cRating: 'contentRating',
-  cKwFreq: 'kwFreq', cKwScore: 'kwScore', cCountries: 'countries',
+  cKw1: 'kw1', cKw2: 'kw2', cKw5: 'kw5', cKw6: 'kw6', cKw7: 'kw7',
+  cKw8: 'kw8', cKw10: 'kw10', cKw11: 'kw11', cKw12: 'kw12', cKw13: 'kw13',
   cEraYear: 'eraYear', cEraDecade: 'eraDecade', cEraGenreMix: 'eraGenreMix', cEraComplete: 'eraComplete',
   cEraSummary: 'eraSummary',
 }};
 let zoomChart = null;
 
 function openZoomModal(canvasId) {{
+  hideChartTooltip();
+  // dismiss any pinned info popups so they don't sit on top
+  document.querySelectorAll('.chart-info-popup').forEach(p => {{
+    p.removeAttribute('data-pinned');
+    p.classList.remove('visible');
+  }});
+  document.querySelectorAll('.chart-info-btn').forEach(b => b.classList.remove('active'));
   const key = CANVAS_TO_C[canvasId];
   const src = key ? C[key] : null;
   if (!src) return;
@@ -3816,7 +4838,8 @@ function closeZoomModal() {{
 
 document.getElementById('zoom-modal-close').addEventListener('click', closeZoomModal);
 document.getElementById('zoom-modal').addEventListener('click', e => {{
-  if (e.target.id === 'zoom-modal') closeZoomModal();
+  const card = document.querySelector('.zoom-modal-card');
+  if (card && !card.contains(e.target)) closeZoomModal();
 }});
 document.addEventListener('keydown', e => {{
   if (e.key === 'Escape') closeZoomModal();
@@ -3825,34 +4848,40 @@ document.addEventListener('keydown', e => {{
 // Inject info + zoom buttons and popups into every chart card
 document.querySelectorAll('.chart-card').forEach(card => {{
   const canvas = card.querySelector('canvas');
-  if (!canvas) return;
-  const info = CHART_INFO[canvas.id];
+  const chartEl = canvas || card.querySelector('[id^="cKw"]');
+  if (!chartEl) return;
+  const chartId = chartEl.id;
+  const info = CHART_INFO[chartId];
 
   const btn = document.createElement('button');
   btn.className = 'chart-info-btn';
   btn.textContent = 'ⓘ';
   btn.title = 'Why this chart / What it shows';
+  btn.setAttribute('aria-label', 'Chart information');
 
   const zoomBtn = document.createElement('button');
   zoomBtn.className = 'chart-zoom-btn';
   zoomBtn.textContent = '\u2922';
   zoomBtn.title = 'Expand chart';
-  zoomBtn.addEventListener('click', e => {{
-    e.stopPropagation();
-    openZoomModal(canvas.id);
-  }});
-
+  zoomBtn.setAttribute('aria-label', 'Expand chart');
   const actions = document.createElement('div');
   actions.className = 'chart-title-actions';
   if (info) actions.appendChild(btn);
-  actions.appendChild(zoomBtn);
+  if (!NO_ZOOM_CHARTS.has(chartId)) {{
+    zoomBtn.addEventListener('click', e => {{
+      e.stopPropagation();
+      if (CANVAS_TO_C[chartId]) openZoomModal(chartId);
+    }});
+    actions.appendChild(zoomBtn);
+  }}
 
   const popup = document.createElement('div');
   popup.className = 'chart-info-popup';
   if (info) {{
     popup.innerHTML =
       `<div class="info-section"><div class="info-label">Why this visualization?</div><div class="info-text">${{info.why}}</div></div>` +
-      `<div class="info-section"><div class="info-label">What it conveys</div><div class="info-text">${{info.what}}</div></div>`;
+      `<div class="info-section"><div class="info-label">What it conveys</div><div class="info-text">${{info.what}}</div></div>` +
+      (info.caveats ? `<div class="info-section"><div class="info-label">Caveats</div><div class="info-text">${{info.caveats}}</div></div>` : '');
   }}
 
   // Wrap title + buttons in a row
