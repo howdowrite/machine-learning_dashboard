@@ -1,7 +1,7 @@
 import csv
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 CSV_PATH = "archive/movie_metadata.csv"
 OUT_PATH = "dashboard.html"
@@ -3857,6 +3857,7 @@ document.querySelectorAll('.chart-card').forEach(card => {{
 
   // Wrap title + buttons in a row
   const titleEl = card.querySelector('.chart-title');
+  if (!titleEl) return;
   const row = document.createElement('div');
   row.className = 'chart-title-row';
   titleEl.replaceWith(row);
