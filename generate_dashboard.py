@@ -1998,7 +1998,7 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
     <div class="chart-card"><span class="chart-id-badge">KW·2</span><div class="chart-title">Keyword Social Reach</div><div class="chart-caption">Distribution of social reach for films sharing the same keywords</div><div class="chart-wrap tall"><canvas id="cKw4" style="width:100%;height:100%;display:block"></canvas></div></div>
     <div class="chart-card"><span class="chart-id-badge">KW·3</span><div class="chart-title">Keyword Word Cloud</div><div class="chart-caption">Plot keywords sized by frequency, colored by avg IMDb score</div><div class="chart-wrap tall"><div id="cKw3" style="width:100%;height:100%"></div></div></div>
     <div class="chart-card"><span class="chart-id-badge">KW·4</span><div class="chart-title">Keyword Co-Occurrence Network</div><div class="chart-caption">Keywords that frequently appear together in the same film</div><div class="chart-wrap tall"><canvas id="cKw9" style="width:100%;height:100%;display:block"></canvas></div></div>
-    <div class="chart-card wide"><span class="chart-id-badge">KW·5</span><div class="chart-title">Box Office Scatter</div><div class="chart-caption">Budget vs. gross with break-even line, colored by genre</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap scatter-h"><canvas id="cKw7"></canvas></div></div>
+    <div class="chart-card wide"><span class="chart-id-badge">KW·5</span><div class="chart-title">Box Office Scatter</div><div class="chart-caption">Budget vs. gross with break-even line, colored by genre · dashed line = break-even</div><div class="score-legend" id="kw7-legend"></div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap scatter-h"><canvas id="cKw7"></canvas></div></div>
     <div class="chart-card"><span class="chart-id-badge">KW·6</span><div class="chart-title">Genre Profit Margins</div><div class="chart-caption">ROI distribution by genre — risk vs. reward</div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap hbar"><canvas id="cKw8"></canvas></div></div>
     <div class="chart-card"><span class="chart-id-badge">KW·7</span><div class="chart-title">Poster Faces vs Social Reach</div><div class="chart-caption">Poster face count vs. movie Facebook likes</div><div class="chart-wrap hbar"><canvas id="cKw10"></canvas></div></div>
     <div class="chart-card"><span class="chart-id-badge">KW·8</span><div class="chart-title">Director Brand Multiplier</div><div class="chart-caption">Director personal brand vs. film social reach</div><div class="chart-wrap hbar-sm"><canvas id="cKw11"></canvas></div></div>
@@ -2619,9 +2619,14 @@ function buildTooltipHTML(title, value, films, fmt) {{
       films.slice(0, 5).forEach(f => {{
         const badge = fmt(f.v);
         const accent = tooltipAccent(badge);
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">`;
+        html += `<div style="margin-bottom:5px">`;
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">`;
         html += `<span style="color:#fff;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">${{truncTipTitle(f.t)}}</span>`;
         html += `<span style="background:#2a2d3a;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;color:${{accent}};flex-shrink:0">${{badge}}</span>`;
+        html += `</div>`;
+        if (f.budget != null && f.gross != null) {{
+          html += `<div style="color:#6b7a90;font-size:10px">${{f.budget}}M → ${{f.gross}}M</div>`;
+        }}
         html += `</div>`;
       }});
     }} else {{
@@ -3578,6 +3583,12 @@ function initKeywords() {{
   const genres7 = [...new Set(D.boxoffice_pts.map(d=>d.genre))].slice(0,10);
   const gColor7 = {{}};
   genres7.forEach((g,i)=>{{gColor7[g]=COLORS[i%COLORS.length];}});
+  (function() {{
+    const leg = document.getElementById('kw7-legend');
+    if (leg) leg.innerHTML = genres7.map(g =>
+      `<span><span style="background:${{gColor7[g]}};width:11px;height:11px;border-radius:3px;display:inline-block;opacity:.85"></span>${{g}}</span>`
+    ).join('');
+  }})();
   C.kw7 = new Chart(document.getElementById('cKw7'), {{
     type: 'scatter',
     data: {{
