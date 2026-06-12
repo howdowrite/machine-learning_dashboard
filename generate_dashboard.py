@@ -442,8 +442,21 @@ for r in rows:
     gv = clean_g(to_float(r.get("gross","")), "")
     if sv: _gn_s[gn].append({"t": tv, "v": round(sv, 1)})
     if gv: _gn_g[gn].append({"t": tv, "v": round(gv/1e6, 1)})
-for d in scatter_data:
-    _gn_r[d["g"]].append({"t": _trunc(d["t"]), "v": d["r"]})
+for r in rows:
+    if not is_us_film(r): continue
+    _b = to_float(r.get("budget", ""))
+    _g = to_float(r.get("gross", ""))
+    if not _b or not _g: continue
+    _title = r.get("movie_title", "").strip()
+    if not is_valid_usd(_b, _g, _title): continue
+    _gn = r.get("genres", "").split("|")[0].strip() or "Other"
+    _roi = round(min((_g - _b) / _b * 100, 1000), 1)
+    _gn_r[_gn].append({
+        "t": _trunc(_title),
+        "v": _roi,
+        "gross":  round(_g / 1e6, 1),
+        "budget": round(_b / 1e6, 1),
+    })
 top_by_genre = {
     gn: {
         "score": sorted(_gn_s[gn], key=lambda x: -x["v"])[:5],
@@ -1359,7 +1372,10 @@ header p  {{ color: var(--muted); margin-top: 3px; font-size: 12px; }}
   user-select: none;
 }}
 .chart-title   {{ font-size: 13px; font-weight: 600; margin-bottom: 3px; }}
-.chart-caption {{ font-size: 11px; color: var(--muted); margin-bottom: 12px; }}
+.chart-caption {{ font-size: 11px; color: var(--muted); margin-bottom: 8px; }}
+.score-legend  {{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }}
+.score-legend span {{ display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); white-space:nowrap; }}
+.score-legend span::before {{ content:''; display:inline-block; width:11px; height:11px; border-radius:3px; flex-shrink:0; }}
 .chart-wrap                 {{ position: relative; height: 240px; overflow: hidden; }}
 .chart-wrap.tall            {{ height: 300px; }}
 .chart-wrap.scatter-h       {{ height: 400px; }}
@@ -1963,8 +1979,8 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
     <div class="kpi" data-tip="Film with the most IMDb user votes in the selected range — the most widely rated and likely most widely watched."><div class="kpi-label">Most Voted Film</div><div class="kpi-value" id="kpi-top-votes-kpi" style="font-size:13px;line-height:1.3">{top_voted_title[:28]}{'…' if len(top_voted_title)>28 else ''}</div><div class="kpi-sub" id="kpi-top-votes-kpi-sub">{top_voted_n:,} votes</div></div>
   </div>
   <div class="charts-grid">
-    <div class="chart-card wide"><span class="chart-id-badge">ENG·1</span><div class="chart-title">Engagement vs Rating — Scatter</div><div class="chart-caption">Each dot = one film · X = IMDB score · Y = votes (thousands) · hover for title</div><div class="chart-wrap scatter-h"><canvas id="cEngagement"></canvas></div></div>
-    <div class="chart-card"><span class="chart-id-badge">ENG·2</span><div class="chart-title">IMDB Score Distribution</div><div class="chart-caption">Number of films per 0.5-point score bucket</div><div class="chart-wrap"><canvas id="cScoreDist"></canvas></div></div>
+    <div class="chart-card wide"><span class="chart-id-badge">ENG·1</span><div class="chart-title">Engagement vs Rating — Scatter</div><div class="chart-caption">Each dot = one film · X = IMDB score · Y = votes (thousands) · hover for title</div><div class="score-legend"><span style="--c:rgba(89,161,79,0.85)"><span style="background:rgba(89,161,79,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>≥ 7.5 Great</span><span><span style="background:rgba(78,121,167,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>6.5–7.4 Good</span><span><span style="background:rgba(237,201,72,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>5.0–6.4 Average</span><span><span style="background:rgba(225,87,89,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>< 5.0 Poor</span></div><div class="chart-wrap scatter-h"><canvas id="cEngagement"></canvas></div></div>
+    <div class="chart-card"><span class="chart-id-badge">ENG·2</span><div class="chart-title">IMDB Score Distribution</div><div class="chart-caption">Number of films per 0.5-point score bucket</div><div class="score-legend"><span><span style="background:rgba(89,161,79,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>≥ 7.5 Great</span><span><span style="background:rgba(78,121,167,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>6.5–7.4 Good</span><span><span style="background:rgba(237,201,72,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>5.0–6.4 Average</span><span><span style="background:rgba(225,87,89,0.85);width:11px;height:11px;border-radius:3px;display:inline-block"></span>< 5.0 Poor</span></div><div class="chart-wrap"><canvas id="cScoreDist"></canvas></div></div>
     <div class="chart-card"><span class="chart-id-badge">ENG·3</span><div class="chart-title">Content Rating Breakdown</div><div class="chart-caption">Film count by MPAA / content rating</div><div class="chart-wrap hbar-sm"><canvas id="cRating"></canvas></div></div>
   </div>
 </div>
@@ -3213,7 +3229,7 @@ function initEngagement() {{
     options:merge(DEF, {{
       plugins:{{ legend:{{ display:false }} }},
       scales:{{
-        x:{{ title:{{ display:true, text:"IMDB Score  ( green ≥ 7.5 · blue 6.5–7.5 · yellow 5–6.5 · red < 5 )", color:"#8892a4", font:{{ size:10 }} }}, min:1, max:10 }},
+        x:{{ title:{{ display:true, text:"IMDB Score", color:"#8892a4", font:{{ size:11 }} }}, min:1, max:10 }},
         y:{{ title:{{ display:true, text:"Votes (thousands)", color:"#8892a4", font:{{ size:11 }} }}, suggestedMin:0, suggestedMax:2500 }}
       }}
     }})
