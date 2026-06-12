@@ -1995,7 +1995,7 @@ tr.filmography-row td {{ padding: 0; background: var(--bg); }}
   </div>
   <div class="charts-grid">
     <div class="chart-card"><span class="chart-id-badge">KW·1</span><div class="chart-title">Top Plot Keywords</div><div class="chart-caption">Most frequently occurring plot keywords across all films</div><div class="chart-wrap hbar"><canvas id="cKw1"></canvas></div></div>
-    <div class="chart-card"><span class="chart-id-badge">KW·2</span><div class="chart-title">Keyword Social Reach</div><div class="chart-caption">Distribution of social reach for films sharing the same keywords</div><div class="chart-wrap tall"><canvas id="cKw4" style="width:100%;height:100%;display:block"></canvas></div></div>
+    <div class="chart-card"><span class="chart-id-badge">KW·2</span><div class="chart-title">Keyword Social Reach</div><div class="chart-caption">Box plot of social reach per keyword · box = IQR · line = median · whiskers = min/max · hover for quartiles</div><div class="chart-wrap tall"><canvas id="cKw4" style="width:100%;height:100%;display:block"></canvas></div></div>
     <div class="chart-card"><span class="chart-id-badge">KW·3</span><div class="chart-title">Keyword Word Cloud</div><div class="chart-caption">Plot keywords sized by frequency, colored by avg IMDb score</div><div class="chart-wrap tall"><div id="cKw3" style="width:100%;height:100%"></div></div></div>
     <div class="chart-card"><span class="chart-id-badge">KW·4</span><div class="chart-title">Keyword Co-Occurrence Network</div><div class="chart-caption">Keywords that frequently appear together in the same film</div><div class="chart-wrap tall"><canvas id="cKw9" style="width:100%;height:100%;display:block"></canvas></div></div>
     <div class="chart-card wide"><span class="chart-id-badge">KW·5</span><div class="chart-title">Box Office Scatter</div><div class="chart-caption">Budget vs. gross with break-even line, colored by genre · dashed line = break-even</div><div class="score-legend" id="kw7-legend"></div><div class="chart-fin-note">⚠ Financial data: US productions only · pre-1970 figures are sparse and unreliable</div><div class="chart-wrap scatter-h"><canvas id="cKw7"></canvas></div></div>
@@ -3500,30 +3500,62 @@ function initKeywords() {{
       ctx.fillRect(0, 0, W, H);
       boxes = [];
       if (!data.length) return;
-      const ml = 60, mr = 20, mt = 20, mb = 30;
+      const ml = 62, mr = 20, mt = 20, mb = 32;
       const bw = Math.floor((W - ml - mr) / data.length);
       const allVals = data.flatMap(d => [d.stats.whislo, d.stats.whishi]);
       const maxV = Math.max(...allVals), minV = 0;
       const scaleY = v => mt + (H - mt - mb) * (1 - (v - minV) / (maxV - minV));
-      ctx.fillStyle = '#8892a4'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
-      [0, 0.25, 0.5, 0.75, 1].forEach(t => {{
-        const v = minV + (maxV - minV) * t;
-        ctx.fillText((v / 1000).toFixed(0) + 'k', ml - 4, scaleY(v) + 3);
+      const ticks = [0, 0.25, 0.5, 0.75, 1];
+
+      // Grid lines
+      ctx.save();
+      ctx.setLineDash([3, 5]);
+      ctx.lineWidth = 1;
+      ticks.forEach(t => {{
+        const y = scaleY(minV + (maxV - minV) * t);
+        ctx.strokeStyle = t === 0 ? 'rgba(136,146,164,0.4)' : 'rgba(136,146,164,0.15)';
+        ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(W - mr, y); ctx.stroke();
       }});
+      ctx.restore();
+
+      // Y-axis spine + tick marks
+      ctx.strokeStyle = 'rgba(136,146,164,0.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(ml, mt); ctx.lineTo(ml, H - mb); ctx.stroke();
+      ticks.forEach(t => {{
+        const y = scaleY(minV + (maxV - minV) * t);
+        ctx.beginPath(); ctx.moveTo(ml - 4, y); ctx.lineTo(ml, y); ctx.stroke();
+      }});
+
+      // Y-axis labels
+      ctx.fillStyle = '#8892a4'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+      ticks.forEach(t => {{
+        const v = minV + (maxV - minV) * t;
+        ctx.fillText((v / 1000).toFixed(0) + 'k', ml - 7, scaleY(v) + 3);
+      }});
+
+      // Box plots
       data.forEach((d, i) => {{
         const s = d.stats, cx = ml + i * bw + bw / 2;
         const q1y = scaleY(s.q1), q3y = scaleY(s.q3), medy = scaleY(s.median), lowy = scaleY(s.whislo), highy = scaleY(s.whishi);
         const bx = cx - bw * 0.3, by = q3y, bw2 = bw * 0.6, bh = q1y - q3y;
         boxes.push({{ x: bx, y: by, w: bw2, h: bh, idx: i, cx, lowy, highy }});
-        ctx.strokeStyle = '#4a9eff'; ctx.lineWidth = 1;
+        // Whisker line
+        ctx.strokeStyle = '#4a9eff'; ctx.lineWidth = 1; ctx.setLineDash([]);
         ctx.beginPath(); ctx.moveTo(cx, lowy); ctx.lineTo(cx, highy); ctx.stroke();
-        ctx.fillStyle = 'rgba(74,158,255,0.3)'; ctx.strokeStyle = '#4a9eff';
+        // Whisker caps
+        const capW = bw * 0.18;
+        ctx.beginPath(); ctx.moveTo(cx - capW, highy); ctx.lineTo(cx + capW, highy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - capW, lowy);  ctx.lineTo(cx + capW, lowy);  ctx.stroke();
+        // IQR box
+        ctx.fillStyle = 'rgba(74,158,255,0.25)'; ctx.strokeStyle = '#4a9eff'; ctx.lineWidth = 1.5;
         ctx.fillRect(bx, by, bw2, bh);
         ctx.strokeRect(bx, by, bw2, bh);
-        ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(cx - bw * 0.3, medy); ctx.lineTo(cx + bw * 0.3, medy); ctx.stroke();
-        ctx.fillStyle = '#8892a4'; ctx.font = '8px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText(d.kw.slice(0, 8), cx, H - mb + 12);
+        // Median line
+        ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(bx, medy); ctx.lineTo(bx + bw2, medy); ctx.stroke();
+        // X-axis label
+        ctx.fillStyle = '#8892a4'; ctx.font = '8px sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 1;
+        ctx.fillText(d.kw.slice(0, 9), cx, H - mb + 14);
       }});
     }}
 
@@ -3557,9 +3589,11 @@ function initKeywords() {{
       const hit = hitBox(e.clientX, e.clientY);
       if (!hit) {{ hideChartTooltip(); return; }}
       const d = data[hit.idx];
-      const med = d.stats.median;
+      const s = d.stats;
+      const fmt = v => (v/1000).toFixed(1)+'k';
+      const statsLine = `Max: ${{fmt(s.whishi)}} · Q3: ${{fmt(s.q3)}} · Med: ${{fmt(s.median)}} · Q1: ${{fmt(s.q1)}} · Min: ${{fmt(s.whislo)}}`;
       const films = (d.films || []).slice(0, 5).map(f => ({{ t: f.t, s: f.s, y: f.y, g: null }}));
-      chartTooltip.innerHTML = buildTooltipHTML(d.kw, `median reach: ${{(med/1000).toFixed(0)}}k`, films, f => f.s ? ` · ★${{f.s}}` : '');
+      chartTooltip.innerHTML = buildTooltipHTML(d.kw, statsLine, films, f => f.s ? ` · ★${{f.s}}` : '');
       chartTooltip.style.display = 'block';
       chartTooltip.style.opacity = '1';
       positionCanvasTip(e.clientX, e.clientY);
@@ -3583,25 +3617,62 @@ function initKeywords() {{
   const genres7 = [...new Set(D.boxoffice_pts.map(d=>d.genre))].slice(0,10);
   const gColor7 = {{}};
   genres7.forEach((g,i)=>{{gColor7[g]=COLORS[i%COLORS.length];}});
-  (function() {{
+
+  // Genre toggle state — all on by default
+  const kw7ActiveGenres = new Set(genres7);
+
+  function kw7FilteredPts(lo, hi) {{
+    return D.boxoffice_pts.filter(d =>
+      d.yr != null && d.yr >= lo && d.yr <= hi && kw7ActiveGenres.has(d.genre)
+    );
+  }}
+
+  function kw7RenderLegend() {{
     const leg = document.getElementById('kw7-legend');
-    if (leg) leg.innerHTML = genres7.map(g =>
-      `<span><span style="background:${{gColor7[g]}};width:11px;height:11px;border-radius:3px;display:inline-block;opacity:.85"></span>${{g}}</span>`
-    ).join('');
-  }})();
+    if (!leg) return;
+    leg.innerHTML = genres7.map(g => {{
+      const active = kw7ActiveGenres.has(g);
+      const col = gColor7[g];
+      return `<span data-genre="${{g}}" style="cursor:pointer;opacity:${{active?1:0.35}};transition:opacity .15s">`
+        + `<span style="background:${{col}};width:11px;height:11px;border-radius:3px;display:inline-block;opacity:.85"></span>${{g}}</span>`;
+    }}).join('');
+    leg.querySelectorAll('span[data-genre]').forEach(el => {{
+      el.addEventListener('click', () => {{
+        const g = el.dataset.genre;
+        if (kw7ActiveGenres.has(g)) {{
+          // keep at least one genre active
+          if (kw7ActiveGenres.size > 1) kw7ActiveGenres.delete(g);
+        }} else {{
+          kw7ActiveGenres.add(g);
+        }}
+        kw7RenderLegend();
+        const pts = kw7FilteredPts(activeMin, activeMax);
+        C.kw7.data.datasets[0].data = pts.map(d => ({{
+          x: d.x * (1 + kwSeededJitter(d.t, 0.05)),
+          y: d.y * (1 + kwSeededJitter(d.t + '|y', 0.05)),
+          ox: d.x, oy: d.y, _d: d,
+        }}));
+        C.kw7.data.datasets[0].backgroundColor = pts.map(d => (gColor7[d.genre]||'#4a9eff')+'b3');
+        C.kw7.update();
+      }});
+    }});
+  }}
+  kw7RenderLegend();
+
+  const _initPts = kw7FilteredPts(activeMin, activeMax);
   C.kw7 = new Chart(document.getElementById('cKw7'), {{
     type: 'scatter',
     data: {{
       datasets: [{{
         label: 'Films',
-        data: D.boxoffice_pts.map(d=>({{
+        data: _initPts.map(d=>({{
           x: d.x * (1 + kwSeededJitter(d.t, 0.05)),
           y: d.y * (1 + kwSeededJitter(d.t + '|y', 0.05)),
           ox: d.x,
           oy: d.y,
           _d: d,
         }})),
-        backgroundColor: D.boxoffice_pts.map(d=>(gColor7[d.genre]||'#4a9eff')+'b3'),
+        backgroundColor: _initPts.map(d=>(gColor7[d.genre]||'#4a9eff')+'b3'),
         pointRadius: 4,
         pointHoverRadius: 7,
         borderWidth: 0,
@@ -3610,8 +3681,8 @@ function initKeywords() {{
     options: merge(DEF, {{
       plugins: {{ legend:{{display:false}} }},
       scales: {{
-        x: {{ title:{{display:true,text:'Budget ($M)',color:'#8892a4',font:{{size:10}}}}, ticks:{{color:'#8892a4'}} }},
-        y: {{ title:{{display:true,text:'Gross ($M)',color:'#8892a4',font:{{size:10}}}}, ticks:{{color:'#8892a4'}} }}
+        x: {{ title:{{display:true,text:'Budget ($M)',color:'#8892a4',font:{{size:11}}}}, ticks:{{color:'#8892a4'}} }},
+        y: {{ title:{{display:true,text:'Gross ($M)',color:'#8892a4',font:{{size:11}}}}, ticks:{{color:'#8892a4'}} }}
       }}
     }})
   }});
@@ -3959,8 +4030,8 @@ function initKeywords() {{
       setCloudData(cloudWords);
     }}
 
-    // kw7: Box Office Scatter
-    const boPts = D.boxoffice_pts.filter(d => d.yr != null && d.yr >= lo && d.yr <= hi);
+    // kw7: Box Office Scatter (respects year range + genre toggle)
+    const boPts = kw7FilteredPts(lo, hi);
     C.kw7.data.datasets[0].data = boPts.map(d => ({{
       x: d.x * (1 + kwSeededJitter(d.t, 0.05)),
       y: d.y * (1 + kwSeededJitter(d.t + '|y', 0.05)),
